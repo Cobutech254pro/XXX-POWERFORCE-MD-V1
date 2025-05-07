@@ -1,46 +1,43 @@
 // In your commands/general.js
 
-async function handleBotInfo(bot, message) {
-  const uptimeSeconds = Math.floor(process.uptime());
-  const uptimeString = formatUptime(uptimeSeconds);
-  const platform = process.platform;
-  const nodeVersion = process.version;
-  const botInfoText = `
-🤖 *Bot Information*
+async function handleMenuCommand(bot, message) {
+  const menuText = `
+🤖 *XXX-FORCE-MD VI - Command Menu*
 
-*Bot Name:* XXX-FORCE-MD VI
-*Uptime:* ${uptimeString}
-*Platform:* ${platform}
-*Node.js Version:* ${nodeVersion}
-*Location:* Sare, Migori County, Kenya
-*Current Time (EAT):* ${new Date().toLocaleTimeString('en-KE', { timeZone: 'Africa/Nairobi' })}
+[Image: URL_TO_YOUR_BOT_IMAGE]
+
+Please type the number corresponding to the category you want to explore:
+
+1.  ℹ️ Bot Information & Status
+2.  ⚙️ General Commands
+3.  🌍 Social Media Downloads
+4.  🛡️ Group Management (in groups)
+5.  🛠️ Utility Commands
+6.  🎮 Fun & Games
+7.  📰 Information Retrieval
+8.  🖼️ Image Manipulation
+9.  🔗 URL Tools
+10. 👤 User Commands
+11. 🌐 General
+
+Once you select a category, you will see a list of commands within that category.
 `;
 
-  await bot.sendMessage(message.from, botInfoText);
+  await bot.sendMessage(message.from, menuText);
 }
 
-function formatUptime(seconds) {
-  const days = Math.floor(seconds / (60 * 60 * 24));
-  const hours = Math.floor((seconds % (60 * 60 * 24)) / (60 * 60));
-  const minutes = Math.floor((seconds % (60 * 60)) / 60);
-  const secs = Math.floor(seconds % 60);
+async function handleHello(bot, message) {
+  const greetings = ["Hello!", "Hi there!", "Hey!", "Greetings!"];
+  const randomGreeting = greetings[Math.floor(Math.random() * greetings.length)];
+  await bot.sendMessage(message.from, `${randomGreeting} How can I help you today?`);
+}
 
-  let uptime = '';
-  if (days > 0) {
-    uptime += `${days} day${days > 1 ? 's' : ''}, `;
-  }
-  if (hours > 0) {
-    uptime += `${hours} hour${hours > 1 ? 's' : ''}, `;
-  }
-  if (minutes > 0) {
-    uptime += `${minutes} minute${minutes > 1 ? 's' : ''}, `;
-  }
-  uptime += `${secs} second${secs !== 1 ? 's' : ''}`;
-
-  return uptime;
+async function handleCreator(bot, message) {
+  await bot.sendMessage(message.from, "I was created with passion and a lot of code. You can think of me as a digital entity here to assist!");
 }
 
 module.exports = {
-  // ... other general command handlers
-  handleBotInfo,
+  handleMenuCommand,
+  handleHello,
+  handleCreator,
 };
