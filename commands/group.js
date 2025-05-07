@@ -97,7 +97,7 @@ async function handleReport(bot, message, args) {
   const quotedMessage = await message.getQuotedMessage();
   const reason = args.join(' ') || 'No reason provided.';
   const reporter = message.author || message.from;
-  await bot.sendMessage(message.from, `Report sent for message from ${quotedMessage.author || quotedMessage.from}: "${quotedMessage.body}" with reason: ${reason}`);
+  await bot.sendMessage(message.from, `Report sent for message from <span class="math-inline">\{quotedMessage\.author \|\| quotedMessage\.from\}\: "</span>{quotedMessage.body}" with reason: ${reason}`);
   // You would typically log this report or notify group admins here.
 }
 
@@ -367,8 +367,7 @@ async function handleMute(bot, message, args) {
     return;
   }
   const userToMute = await message.getQuotedMessage().getContact();
-  const duration = args[0] || 'temporary'; // Example: !
-  // ... (previous group command handlers)
+  const duration = args[0] || 'temporary'; // Example: !// ... (previous group command handlers)
 
 async function handleUnmute(bot, message) {
   const chat = await message.getChat();
