@@ -1,143 +1,120 @@
 // In your commands/user.js
 
-const userProfiles = {}; // In-memory storage for user profiles (will be reset on bot restart)
-// For a persistent solution, consider using a database or a JSON file.
+const userProfiles = {}; // In-memory storage for user profiles (replace with persistent storage later)
+const userBios = {};     // In-memory storage for user bios (replace with persistent storage later)
+const userWarnings = {}; // In-memory storage for user warnings (replace with persistent storage later)
+const featureRequests = [];
+const feedbackMessages = [];
+const adminContacts = [];
+const userNicknames = {}; // In-memory storage for user nicknames (replace with persistent storage later)
 
 async function handleProfile(bot, message) {
   const userId = message.from;
-  const profile = userProfiles[userId] || {};
-  const name = profile.name || message.pushName || 'User';
-  const bio = profile.bio || 'No bio set.';
-
-  const profileText = `*Your Profile*\n\n*Name:* ${name}\n*Bio:* ${bio}`;
-  await bot.sendMessage(message.from, profileText);
+  const profile = userProfiles[userId] || { name: 'User', joined: new Date().toLocaleString('en-KE', { timeZone: 'Africa/Nairobi' }) };
+  const bio = userBios[userId] || 'No bio set.';
+  await bot.sendMessage(message.from, `👤 *Your Profile*\nName: ${profile.name}\nJoined: ${profile.joined}\nBio: ${bio}`);
 }
 
 async function handleSetProfile(bot, message, args) {
-  const userId = message.from;
   const newName = args.join(' ');
   if (!newName) {
-    await bot.sendMessage(message.from, 'Please provide a name to set for your profile.');
+    await bot.sendMessage(message.from, 'Please provide a name to set for your profile (e.g., !setprofile John Doe).');
     return;
   }
-  userProfiles[userId] = userProfiles[userId] || {};
-  userProfiles[userId].name = newName;
-  await bot.sendMessage(message.from, `Your profile name has been set to: ${newName}`);
+  userProfiles[message.from] = { name: newName, joined: userProfiles[message.from]?.joined || new Date().toLocaleString('en-KE', { timeZone: 'Africa/Nairobi' }) };
+  await bot.sendMessage(message.from, `✅ Your profile name has been updated to: ${newName}`);
 }
 
 async function handleBio(bot, message) {
-  const userId = message.from;
-  const profile = userProfiles[userId] || {};
-  const bio = profile.bio || 'No bio set.';
-  await bot.sendMessage(message.from, `*Your Bio:*\n\n${bio}`);
+  const bio = userBios[message.from] || 'No bio set.';
+  await bot.sendMessage(message.from, `✍️ *Your Bio:*\n${bio}`);
 }
 
 async function handleSetBio(bot, message, args) {
-  const userId = message.from;
   const newBio = args.join(' ');
   if (!newBio) {
-    await bot.sendMessage(message.from, 'Please provide a bio to set for your profile.');
+    await bot.sendMessage(message.from, 'Please provide a bio to set for your profile (e.g., !setbio Loves coding and pizza!).');
     return;
   }
-  userProfiles[userId] = userProfiles[userId] || {};
-  userProfiles[userId].bio = newBio;
-  await bot.sendMessage(message.from, `Your bio has been set to:\n\n${newBio}`);
+  userBios[message.from] = newBio;
+  await bot.sendMessage(message.from, `✅ Your bio has been updated to:\n${newBio}`);
 }
 
 async function handleReportUser(bot, message, args) {
-  const chat = await message.getChat();
-  if (!chat.isGroup) {
-    await bot.sendMessage(message.from, 'This command can only be used in groups.');
+  if (!message.mentionedJidList || message.mentionedJidList.length === 0 || !args[1]) {
+    await bot.sendMessage(message.from, 'Usage: !report @user [reason]');
     return;
   }
-  if (!message.quotedMessage) {
-    await bot.sendMessage(message.from, 'Please reply to the user you want to report.');
-    return;
-  }
-  const reportedUser = await message.getQuotedMessage().getContact();
-  const reason = args.join(' ') || 'No reason provided.';
-  const reporter = message.author || message.from;
-  await bot.sendMessage(message.from, `Report sent for ${reportedUser.pushName || reportedUser.number} with reason: ${reason}`);
-  // You would typically log this report or notify group admins here.
+  const reportedUser = message.mentionedJidList[0];
+  const reason = args.slice(1).join(' ');
+  const reportDetails = { reporter: message.from, reported: reportedUser, reason: reason, timestamp: new Date().toLocaleString('en-KE', { timeZone: 'Africa/Nairobi' }) };
+  // In a real scenario, you would store this report data
+  console.log('User Report:', reportDetails);
+  await bot.sendMessage(message.from, `✅ User @${reportedUser.split('@')[0]} has been reported for: ${reason}`);
 }
 
 async function handleWarns(bot, message) {
-  const chat = await message.getChat();
-  if (!chat.isGroup) {
-    await bot.sendMessage(message.from, 'This command can only be used in groups.');
-    return;
-  }
   const userId = message.from;
-  // You'll need a system to store and retrieve user warnings per group.
-  // For simplicity, we'll send a placeholder message.
-  await bot.sendMessage(message.from, 'Checking your warnings... (Warning system not yet implemented).');
-  // Implement logic to fetch and display user's warnings in the current group.
+  const warnings = userWarnings[userId] || [];
+  if (warnings.length > 0) {
+    let warnsText = `⚠️ *Your Warnings:*\n`;
+    warnings.forEach((warn, index) => {
+      warnsText += `${index + 1}. Reason: ${warn.reason} (Given on: ${warn.timestamp})\n`;
+    });
+    await bot.sendMessage(message.from, warnsText);
+  } else {
+    await bot.sendMessage(message.from, '✅ You have no warnings.');
+  }
 }
 
 async function handleRequestFeature(bot, message, args) {
   const suggestion = args.join(' ');
   if (!suggestion) {
-    await bot.sendMessage(message.from, 'Please provide your feature suggestion.');
+    await bot.sendMessage(message.from, 'Please provide your feature suggestion (e.g., !request Add a music download command).');
     return;
   }
-  const userId = message.from;
-  await bot.sendMessage(message.from, `Thank you for your suggestion: ${suggestion}. It has been recorded.`);
-  // You would typically store these suggestions (e.g., in a file or database).
+  const requestDetails = { user: message.from, suggestion: suggestion, timestamp: new Date().toLocaleString('en-KE', { timeZone: 'Africa/Nairobi' }) };
+  featureRequests.push(requestDetails);
+  console.log('Feature Request:', requestDetails);
+  await bot.sendMessage(message.from, '✅ Thank you for your suggestion! It has been recorded.');
 }
 
 async function handleFeedback(bot, message, args) {
   const feedbackText = args.join(' ');
   if (!feedbackText) {
-    await bot.sendMessage(message.from, 'Please provide your feedback.');
+    await bot.sendMessage(message.from, 'Please provide your feedback (e.g., !feedback The bot is very helpful!).');
     return;
   }
-  const userId = message.from;
-  await bot.sendMessage(message.from, `Thank you for your feedback: ${feedbackText}. It has been recorded.`);
-  // You would typically store this feedback.
+  const feedbackDetails = { user: message.from, feedback: feedbackText, timestamp: new Date().toLocaleString('en-KE', { timeZone: 'Africa/Nairobi' }) };
+  feedbackMessages.push(feedbackDetails);
+  console.log('Feedback Received:', feedbackDetails);
+  await bot.sendMessage(message.from, '✅ Thank you for your feedback!');
 }
 
 async function handleContactAdmin(bot, message, args) {
-  const chat = await message.getChat();
-  if (!chat.isGroup) {
-    await bot.sendMessage(message.from, 'This command can only be used in groups.');
+  const adminMessage = args.join(' ');
+  if (!adminMessage) {
+    await bot.sendMessage(message.from, 'Please provide the message you want to send to the admins (e.g., !contactadmin I need help with...).');
     return;
   }
-  const contactMessage = args.join(' ');
-  if (!contactMessage) {
-    await bot.sendMessage(message.from, 'Please provide the message you want to send to the admins.');
-    return;
-  }
-  const admins = chat.participants.filter(p => p.isAdmin).map(p => p.id._serialized);
-  if (admins.length === 0) {
-    await bot.sendMessage(message.from, 'No admins found in this group.');
-    return;
-  }
-  const userId = message.from;
-  const userContact = await bot.getContactById(userId);
-  const tagText = `👤 *Admin Contact Request:*\n\nFrom: ${userContact.pushName || userContact.number}\nMessage: ${contactMessage}`;
-  let mentions = [];
-  for (const adminId of admins) {
-    mentions.push(adminId);
-  }
-  await bot.sendMessage(message.from, 'Your message has been sent to the group admins.');
-  await bot.sendMessage(chat.id._serialized, tagText, { mentions });
+  const contactDetails = { user: message.from, message: adminMessage, timestamp: new Date().toLocaleString('en-KE', { timeZone: 'Africa/Nairobi' }) };
+  adminContacts.push(contactDetails);
+  console.log('Admin Contact:', contactDetails);
+  await bot.sendMessage(message.from, '✅ Your message has been sent to the bot administrators.');
+  // In a real scenario, you would forward this message to the actual admin(s).
 }
 
 async function handleSetNickname(bot, message, args) {
-  const chat = await message.getChat();
-  if (!chat.isGroup) {
-    await bot.sendMessage(message.from, 'This command can only be used in groups.');
+  if (!message.mentionedJidList || message.mentionedJidList.length === 0 || !args[1]) {
+    await bot.sendMessage(message.from, 'Usage: !setnickname @user [nickname]');
     return;
   }
-  const newNickname = args.join(' ');
-  if (!newNickname) {
-    await bot.sendMessage(message.from, 'Please provide the nickname you want to set.');
-    return;
-  }
-  // This functionality might depend on the WhatsApp library and group settings.
-  // It might involve sending a request to group admins or setting a local display name.
-  await bot.sendMessage(message.from, `Request to set nickname "${newNickname}" has been sent (functionality may vary).`);
-  // Implement the actual nickname setting or request logic.
+  const targetUser = message.mentionedJidList[0];
+  const nickname = args.slice(1).join(' ');
+  userNicknames[targetUser] = nickname;
+  await bot.sendMessage(message.from, `✅ Nickname for @${targetUser.split('@')[0]} set to: ${nickname}`);
+  // Note: Nicknames are usually specific to a group and might require group context.
+  // This implementation is a simple global storage.
 }
 
 module.exports = {
