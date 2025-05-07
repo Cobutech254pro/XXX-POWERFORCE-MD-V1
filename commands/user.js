@@ -2,11 +2,22 @@
 
 const userProfiles = {}; // In-memory storage for user profiles (replace with persistent storage later)
 const userBios = {};     // In-memory storage for user bios (replace with persistent storage later)
-const userWarnings = {}; // In-memory storage for user warnings (replace with persistent storage later)
+const userWarnings = {}; 
 const featureRequests = [];
 const feedbackMessages = [];
 const adminContacts = [];
 const userNicknames = {}; // In-memory storage for user nicknames (replace with persistent storage later)
+
+// Bot owner number (replace with your number including country code)
+const botOwnerNumber = '+YOUR_BOT_OWNER_NUMBER';
+const botAdmins = ['+ADMIN_NUMBER_1', '+ADMIN_NUMBER_2']; // Add other admin numbers if needed
+
+// In-memory state for auto-read (this will be lost on bot restart)
+let autoReadEnabled = false;
+
+async function isBotAdmin(message) {
+  return message.from === botOwnerNumber || botAdmins.includes(message.from);
+}
 
 async function handleProfile(bot, message) {
   const userId = message.from;
@@ -117,6 +128,44 @@ async function handleSetNickname(bot, message, args) {
   // This implementation is a simple global storage.
 }
 
+async function handleDeleteMessage(bot, message, args) {
+  if (!await isBotAdmin(message)) {
+    await bot.sendMessage(message.from, '🚫 This command is only for bot owners and administrators.');
+    return;
+  }
+
+  if (!message.quotedMessage) {
+    await bot.sendMessage(message.from, 'Please reply to the message you want to delete with the !delete command.');
+    return;
+  }
+
+  try {
+    await message.quotedMessage.delete(true); // The 'true' argument deletes for everyone
+    await bot.sendMessage(message.from, '✅ Message deleted successfully.');
+  } catch (error) {
+    console.error('Error deleting message:', error);
+    await bot.sendMessage(message.from, '❌ Failed to delete the message.');
+  }
+}
+
+async function handleAutoRead(bot, message, args) {
+  if (!await isBotAdmin(message)) {
+    await bot.sendMessage(message.from, '🚫 This command is only for bot owners and administrators.');
+    return;
+  }
+
+  const action = args[0] ? args[0].toLowerCase() : '';
+  if (action === 'on') {
+    autoReadEnabled = true;
+    await bot.sendMessage(message.from, '✅ Auto-read enabled.');
+  } else if (action === 'off') {
+    autoReadEnabled = false;
+    await bot.sendMessage(message.from, '✅ Auto-read disabled.');
+  } else {
+    await bot.sendMessage(message.from, 'Usage: !autoread on | off');
+  }
+}
+
 module.exports = {
   handleProfile,
   handleSetProfile,
@@ -128,4 +177,6 @@ module.exports = {
   handleFeedback,
   handleContactAdmin,
   handleSetNickname,
+  handleDeleteMessage,
+  handleAutoRead, 
 };
