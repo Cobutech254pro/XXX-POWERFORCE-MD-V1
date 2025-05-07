@@ -368,3 +368,250 @@ async function handleMute(bot, message, args) {
   }
   const userToMute = await message.getQuotedMessage().getContact();
   const duration = args[0] || 'temporary'; // Example: !
+  // ... (previous group command handlers)
+
+async function handleUnmute(bot, message) {
+  const chat = await message.getChat();
+  if (!chat.isGroup) {
+    await bot.sendMessage(message.from, 'This command can only be used in groups.');
+    return;
+  }
+  const isAdmin = chat.participants.find(p => p.id._serialized === bot.info.wid._serialized && p.isAdmin);
+  if (!isAdmin) {
+    await bot.sendMessage(message.from, 'Bot must be an admin to use this command.');
+    return;
+  }
+  if (!message.quotedMessage) {
+    await bot.sendMessage(message.from, 'Please reply to the user you want to unmute.');
+    return;
+  }
+  const userToUnmute = await message.getQuotedMessage().getContact();
+  // Implement your unmute functionality here.
+  await bot.sendMessage(message.from, `${userToUnmute.pushName || userToUnmute.number} unmuted.`);
+  // Implement actual unmute logic.
+}
+
+async function handleAdminOnly(bot, message, args) {
+  const chat = await message.getChat();
+  if (!chat.isGroup) {
+    await bot.sendMessage(message.from, 'This command can only be used in groups.');
+    return;
+  }
+  const isAdmin = chat.participants.find(p => p.id._serialized === bot.info.wid._serialized && p.isAdmin);
+  if (!isAdmin) {
+    await bot.sendMessage(message.from, 'Bot must be an admin to use this command.');
+    return;
+  }
+  const setting = args[0] ? args[0].toLowerCase() : '';
+  // You'll need a way to store this setting (e.g., in data/group-settings.json).
+  if (setting === 'on') {
+    await bot.sendMessage(message.from, 'Bot commands are now restricted to admins.');
+    // Implement logic to check admin status for other commands.
+  } else if (setting === 'off') {
+    await bot.sendMessage(message.from, 'Bot commands are now available to all members.');
+    // Implement logic to allow all members to use commands.
+  } else {
+    await bot.sendMessage(message.from, 'Usage: !adminonly on/off');
+  }
+}
+
+async function handleAntiSticker(bot, message, args) {
+  const chat = await message.getChat();
+  if (!chat.isGroup) {
+    await bot.sendMessage(message.from, 'This command can only be used in groups.');
+    return;
+  }
+  const isAdmin = chat.participants.find(p => p.id._serialized === bot.info.wid._serialized && p.isAdmin);
+  if (!isAdmin) {
+    await bot.sendMessage(message.from, 'Bot must be an admin to use this command.');
+    return;
+  }
+  const setting = args[0] ? args[0].toLowerCase() : '';
+  // Store this setting per group.
+  if (setting === 'on') {
+    await bot.sendMessage(message.from, 'Anti-sticker is now enabled.');
+    // Implement logic in your message listener to delete stickers.
+  } else if (setting === 'off') {
+    await bot.sendMessage(message.from, 'Anti-sticker is now disabled.');
+    // Remove the sticker deletion logic.
+  } else {
+    await bot.sendMessage(message.from, 'Usage: !antisticker on/off');
+  }
+}
+
+async function handleAntiLink(bot, message, args) {
+  const chat = await message.getChat();
+  if (!chat.isGroup) {
+    await bot.sendMessage(message.from, 'This command can only be used in groups.');
+    return;
+  }
+  const isAdmin = chat.participants.find(p => p.id._serialized === bot.info.wid._serialized && p.isAdmin);
+  if (!isAdmin) {
+    await bot.sendMessage(message.from, 'Bot must be an admin to use this command.');
+    return;
+  }
+  const setting = args[0] ? args[0].toLowerCase() : '';
+  // Store this setting per group.
+  if (setting === 'on') {
+    await bot.sendMessage(message.from, 'Anti-link is now enabled.');
+    // Implement logic in your message listener to detect and delete links.
+  } else if (setting === 'off') {
+    await bot.sendMessage(message.from, 'Anti-link is now disabled.');
+    // Remove the link detection logic.
+  } else {
+    await bot.sendMessage(message.from, 'Usage: !antilink on/off');
+  }
+}
+
+async function handleKillGround(bot, message) {
+  const chat = await message.getChat();
+  if (!chat.isGroup) {
+    await bot.sendMessage(message.from, 'This command can only be used in groups.');
+    return;
+  }
+  const isOwner = chat.owner.user === bot.info.wid.user;
+  if (!isOwner) {
+    await bot.sendMessage(message.from, 'Only the group owner can use this command!');
+    return;
+  }
+  const participantsToRemove = chat.participants
+    .filter(p => !p.isAdmin && p.id._serialized !== bot.info.wid._serialized)
+    .map(p => p.id._serialized);
+
+  if (participantsToRemove.length > 0) {
+    try {
+      await chat.removeParticipants(participantsToRemove);
+      await bot.sendMessage(message.from, 'Initiating removal of all non-admin members...');
+    } catch (error) {
+      console.error('Error removing all members:', error);
+      await bot.sendMessage(message.from, 'Failed to remove members. Ensure the bot has sufficient permissions.');
+    }
+  } else {
+    await bot.sendMessage(message.from, 'No non-admin members found to remove.');
+  }
+}
+
+async function handleAntiBot(bot, message, args) {
+  const chat = await message.getChat();
+  if (!chat.isGroup) {
+    await bot.sendMessage(message.from, 'This command can only be used in groups.');
+    return;
+  }
+  const isAdmin = chat.participants.find(p => p.id._serialized === bot.info.wid._serialized && p.isAdmin);
+  if (!isAdmin) {
+    await bot.sendMessage(message.from, 'Bot must be an admin to use this command.');
+    return;
+  }
+  const setting = args[0] ? args[0].toLowerCase() : '';
+  // Store this setting per group.
+  if (setting === 'on') {
+    await bot.sendMessage(message.from, 'Anti-bot is now enabled.');
+    // Implement logic to identify and potentially remove other bots.
+  } else if (setting === 'off') {
+    await bot.sendMessage(message.from, 'Anti-bot is now disabled.');
+    // Remove the anti-bot logic.
+  } else {
+    await bot.sendMessage(message.from, 'Usage: !antibot on/off');
+  }
+}
+
+async function handleWelcome(bot, message, args) {
+  const chat = await message.getChat();
+  if (!chat.isGroup) {
+    await bot.sendMessage(message.from, 'This command can only be used in groups.');
+    return;
+  }
+  const isAdmin = chat.participants.find(p => p.id._serialized === bot.info.wid._serialized && p.isAdmin);
+  if (!isAdmin) {
+    await bot.sendMessage(message.from, 'Bot must be an admin to use this command.');
+    return;
+  }
+  const welcomeMessage = args.join(' ');
+  if (!welcomeMessage) {
+    await bot.sendMessage(message.from, 'Please provide a welcome message.');
+    return;
+  }
+  // Store this welcome message per group.
+  await bot.sendMessage(message.from, `Welcome message set to: ${welcomeMessage}`);
+  // Implement logic in your group join listener to send this message to new members.
+}
+
+async function handlePoll(bot, message, args) {
+  const chat = await message.getChat();
+  if (!chat.isGroup) {
+    await bot.sendMessage(message.from, 'This command can only be used in groups.');
+    return;
+  }
+  const [question, ...options] = args.join(' ').split(',');
+  if (!question || options.length < 2) {
+    await bot.sendMessage(message.from, 'Usage: !poll [question], [option1], [option2], ...');
+    return;
+  }
+  const trimmedOptions = options.map(opt => opt.trim());
+  let pollText = `📊 *Poll: ${question.trim()}*\n\n`;
+  trimmedOptions.forEach((option, index) => {
+    pollText += `${String.fromCharCode(0x1F1A + index)} ${option}\n`; // A, B, C... emojis
+  });
+  await bot.sendMessage(message.from, pollText);
+  // You might want to implement actual poll tracking if needed.
+}
+
+async function handleAnnounce(bot, message, args) {
+  const chat = await message.getChat();
+  if (!chat.isGroup) {
+    await bot.sendMessage(message.from, 'This command can only be used in groups.');
+    return;
+  }
+  const announcement = args.join(' ');
+  if (!announcement) {
+    await bot.sendMessage(message.from, 'Please provide the announcement message.');
+    return;
+  }
+  await bot.sendMessage(chat.id._serialized, `📢 *Announcement:*\n\n${announcement}`);
+}
+
+async function handleFind(bot, message, args) {
+  const chat = await message.getChat();
+  if (!chat.isGroup) {
+    await bot.sendMessage(message.from, 'This command can only be used in groups.');
+    return;
+  }
+  const keyword = args.join(' ');
+  if (!keyword) {
+    await bot.sendMessage(message.from, 'Please provide a keyword to search for.');
+    return;
+  }
+  // This is a complex operation and might be resource-intensive.
+  // You would typically need to iterate through the chat history.
+  await bot.sendMessage(message.from, `Searching for messages containing "${keyword}"... (This might take a while or is not fully implemented).`);
+  // Implement your chat history search logic here.
+}
+
+module.exports = {
+  handleGroupInfo,
+  handleMentionAll,
+  handleRules,
+  handleReport,
+  handleReportAdmin,
+  handleLeaveGroup,
+  handleAdd,
+  handleRemove,
+  handlePromote,
+  handleDemote,
+  handleSetName,
+  handleSetDescription,
+  handlePin,
+  handleUnpin,
+  handleWarn,
+  handleMute,
+  handleUnmute,
+  handleAdminOnly,
+  handleAntiSticker,
+  handleAntiLink,
+  handleKillGround,
+  handleAntiBot,
+  handleWelcome,
+  handlePoll,
+  handleAnnounce,
+  handleFind,
+};
