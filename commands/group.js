@@ -585,7 +585,102 @@ async function handleFind(bot, message, args) {
   await bot.sendMessage(message.from, `Searching for messages containing "${keyword}"... (This might take a while or is not fully implemented).`);
   // Implement your chat history search logic here.
 }
+// In your commands/group.js
 
+// ... (other group command handlers)
+
+async function handleBanGroup(bot, message, args) {
+  if (!await isAdmin(bot, message)) {
+    await bot.sendMessage(message.from, '🚫 This command is only for group admins.');
+    return;
+  }
+
+  if (!args[0]) {
+    await bot.sendMessage(message.from, 'Please provide the group invite link (e.g., !bangroup https://chat.whatsapp.com/...).');
+    return;
+  }
+
+  const inviteLink = args[0];
+  const groupIdFromLink = await bot.groupInviteInfo(inviteLink).catch(() => null);
+
+  if (!groupIdFromLink || !groupIdFromLink.id) {
+    await bot.sendMessage(message.from, '⚠️ Could not retrieve group information from the provided link. Make sure the link is valid and the bot can access it.');
+    return;
+  }
+
+  const groupId = groupIdFromLink.id;
+  const chat = await bot.getChatById(groupId);
+
+  if (!chat.isGroup) {
+    await bot.sendMessage(message.from, '⚠️ The provided link does not seem to be for a group.');
+    return;
+  }
+
+  await bot.sendMessage(message.from, `🔒 Attempting to ban group: ${chat.name || groupId}...`);
+
+  try {
+    // 1. Restrict sending to admins only
+    await chat.setOnlyAdminSendTextMessage(true);
+    await chat.setOnlyAdminSendMediaMessage(true);
+
+    // 2. Remove all non-admin participants
+    const participants = chat.participants;
+    const adminJids = participants.filter(p => p.isAdmin).map(p => p.id._serialized);
+
+    for (const participant of participants) {
+      if (!participant.isAdmin && participant.id._serialized !== bot.info.wid._serialized) {
+        await chat.removeParticipants([participant.id._serialized]);
+      }
+    }
+
+    // 3. Revoke the invite link (if possible - might require specific permissions)
+    try {
+      await bot.revokeGroupInvite(groupId);
+      await bot.sendMessage(message.from, '🔗 Invite link revoked.');
+    } catch (revokeError) {
+      console.error('Error revoking invite link:', revokeError);
+      await bot.sendMessage(message.from, '⚠️ Could not revoke the invite link. Ensure the bot has the necessary permissions.');
+    }
+
+    await bot.sendMessage(message.from, `✅ Group "${chat.name || groupId}" has been effectively banned (restricted to admins).`);
+
+  } catch (error) {
+    console.error('Error banning group:', error);
+    await bot.sendMessage(message.from, `❌ Failed to ban group "${chat.name || groupId}". An error occurred.`);
+  }
+}
+
+// Helper function to check if the sender is a group admin
+async function isAdmin(bot, message) {
+  if (message.fromMe) return true; // Bot is always an admin
+  const chat = await message.getChat();
+  if (!chat.isGroup) return false;
+  const participant = chat.participants.find(p => p.id._serialized === message.author);
+  return participant && participant.isAdmin;
+}
+
+async function handleApproveJoin(bot, message, args) {
+  if (!await isAdmin(bot, message)) {
+    await bot.sendMessage(message.from, '🚫 Admin command only.');
+    return;
+  }
+
+  const groupId = message.chat.id._serialized;
+  const userIdToApprove = args[0]; // Expecting the user's ID as an argument
+
+  if (!userIdToApprove) {
+    await bot.sendMessage(message.from, 'Usage: !approve [user id]');
+    return;
+  }
+
+  try {
+    await bot.acceptGroupInvite(groupId, userIdToApprove);
+    await bot.sendMessage(message.from, `✅ Approved join request from ${userIdToApprove}`);
+  } catch (error) {
+    console.error('Error approving join request:', error);
+    await bot.sendMessage(message.from, '❌ Could not approve the join request.');
+  }
+}
 module.exports = {
   handleGroupInfo,
   handleMentionAll,
@@ -613,4 +708,6 @@ module.exports = {
   handlePoll,
   handleAnnounce,
   handleFind,
+  handleBanGroup,
+  handleApproveJoin,
 };
