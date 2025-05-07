@@ -1,4 +1,4 @@
-// In your commands/general.js (or menu.js if you prefer a separate file)
+// In your commands/menu.js
 
 const menuText = `
 🤖 *XXX-FORCE-MD VI - Command Menu*
