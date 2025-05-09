@@ -1,7 +1,7 @@
 {
-  "name": "your-whatsapp-bot",
+  "name": "XXX-FORCE-MD-V1",
   "version": "1.0.0",
-  "description": "A WhatsApp bot created with whatsapp-web.js",
+  "description": "A WhatsApp bot using Baileys",
   "main": "index.js",
   "scripts": {
     "start": "node index.js"
@@ -13,7 +13,6 @@
     "jimp": "^0.22.11",
     "qrcode-terminal": "^0.12.0",
     "uuid": "^9.0.1",
-    "whatsapp-web.js": "^1.21.0"
-    // Add other dependencies here as you use them (e.g., node-fetch, translate-google)
+    "@whiskeysockets/baileys": "^6.6.0"
   }
 }
