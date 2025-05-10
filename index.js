@@ -1,143 +1,73 @@
 // index.js
+import makeWASocket, {
+  DisconnectReason,
+  fetchLatestBaileysVersion,
+  makeInMemoryStore,
+  useMultiFileAuthState,
+} from '@whiskeysockets/baileys';
+import qrcode from 'qrcode-terminal';
+import * as fs from 'node:fs'; // Import the 'fs' module
+import path from 'path';
 
-const {
-    default: makeWASocket,
-    useSingleFileAuthState,
-    DisconnectReason,
-    fetchLatestBaileysVersion,
-    generateWAMessageFromContent,
-    proto
-} = require('@whiskeysockets/baileys');
-const { Boom } = require('@hapi/boom');
-const qrcode = require('qrcode-terminal');
-const config = require('./config');
-const fs = require('node:fs');
+// Import your command handler or other bot logic
+import { handleCommand } from './handler'; // Assuming you have a handler.js
 
-// Import command handlers
-const botInfoHandler = require('./commands/botinfo');
-const generalHandler = require('./commands/general');
-const groupHandler = require('./commands/group');
-const userHandler = require('./commands/user');
-const utilityHandler = require('./commands/utility');
-const chatbotHandler = require('./commands/chatbot');
-const downloadHandler = require('./commands/download');
-const funHandler = require('./commands/fun');
-const infoHandler = require('./commands/info');
-const imageHandler = require('./commands/image');
-const urlHandler = require('./commands/url');
-const menuHandler = require('./commands/menu');
+// --- Configuration ---
+const SESSION_FOLDER = './auth_info'; // Folder to store authentication files
 
-// Auth
-const { state, saveState } = useSingleFileAuthState('./auth_info.json');
+// --- Function to start the WhatsApp bot ---
+async function startWhatsAppBot() {
+  const { state, saveCreds } = await useMultiFileAuthState(SESSION_FOLDER);
+  const { version, isLatest } = await fetchLatestBaileysVersion();
+  console.log(`Using Baileys v${version}, isLatest: ${isLatest}`);
 
-let autoReadEnabled = config.autoReadDefault;
-let autoTypingEnabled = config.autoTypingDefault;
-let autoRecordingEnabled = config.autoRecordingDefault;
-let phoneNumber = config.botOwnerNumber; // Use the configured owner number for pairing
+  const sock = makeWASocket({
+    version,
+    logger: console,
+    auth: state,
+    // Add other socket options as needed
+  });
 
-async function startBot() {
-    const { version } = await fetchLatestBaileysVersion();
-    const sock = makeWASocket({
-        version,
-        auth: state,
-        printQRInTerminal: !phoneNumber, // Only print QR if no phone number configured
-        pairingCode: !!phoneNumber, // Request pairing code if phone number is configured
+  // --- Event Handlers ---
+
+  sock.ev.on('connection.update', async (update) => {
+    const { connection, lastDisconnect } = update;
+    if (connection === 'close') {
+      // reconnect if not intentional close
+      if (lastDisconnect?.error?.output?.statusCode !== DisconnectReason.loggedOut) {
+        console.log('Connection closed unexpectedly, trying to reconnect in 5 seconds...');
+        setTimeout(startWhatsAppBot, 5000);
+      } else {
+        console.log('Connection closed because you logged out.');
+      }
+    } else if (connection === 'open') {
+      console.log('✅ Bot is ready!');
+    }
+  });
+
+  sock.ev.on('creds.update', saveCreds);
+
+  sock.ev.on('messages.upsert', async (m) => {
+    const msg = m.messages[0];
+    if (!msg?.message) return;
+
+    // Prevent processing self-messages and status updates
+    if (msg.key.fromMe || msg.key.remoteJid === 'status@broadcast') return;
+
+    const prefix = '!'; // Your command prefix
+    if (msg.message.conversation?.startsWith(prefix) || msg.message?.imageMessage?.caption?.startsWith(prefix)) {
+      await handleCommand(sock, msg, prefix);
+    }
+  });
+
+  // --- QR Code Handling (only needed if no saved session) ---
+  if (!fs.existsSync(path.join(__dirname, SESSION_FOLDER, 'creds.json'))) {
+    sock.ev.on('qr', (qr) => {
+      qrcode.generate(qr, { small: true });
+      console.log('Scan the QR code above to authenticate.');
     });
-
-    sock.ev.on('creds.update', saveState);
-
-    sock.ev.on('connection.update', async (update) => {
-        const { connection, lastDisconnect, qr } = update;
-        if (connection === 'close') {
-            const shouldReconnect = (lastDisconnect?.error = new Boom(lastDisconnect.error))?.output?.statusCode !== DisconnectReason.loggedOut;
-            console.log('connection closed, reconnecting:', shouldReconnect);
-            if (shouldReconnect) startBot();
-        } else if (connection === 'open') {
-            console.log('✅ Bot is ready!');
-            await sock.sendMessage(config.botOwnerNumber + '@s.whatsapp.net', { text: '✅ Bot is online!' });
-        } else if (connection === 'connecting' && qr && !phoneNumber) {
-            qrcode.generate(qr, { small: true });
-            console.log('Scan QR code to pair.');
-        }
-    });
-
-    sock.ev.on('requestPairingCode', async (code) => {
-        // Pairing code received, you need to enter this on your WhatsApp.
-        console.log(`Request Pairing Code: ${code}`);
-        // In a real deployment, you might want to send this code to the bot owner securely.
-        // The user will open WhatsApp > Linked Devices > Link with phone number and enter this code.
-    });
-
-    sock.ev.on('messages.upsert', async ({ messages }) => {
-        if (!messages || !messages[0]) return;
-        const msg = messages[0];
-        const from = msg.key.remoteJid;
-        const isGroup = from.endsWith('@g.us');
-        const messageContent = msg.message?.conversation ||
-            msg.message?.extendedTextMessage?.text ||
-            msg.message?.imageMessage?.caption ||
-            msg.message?.videoMessage?.caption;
-
-        if (!messageContent) return;
-
-        const lower = messageContent.trim().toLowerCase();
-        const args = messageContent.split(' ').slice(1);
-
-        // Auto-read
-        if (autoReadEnabled) {
-            await sock.readMessages([msg.key]);
-        }
-
-        // Simulate typing
-        if ((autoTypingEnabled || autoRecordingEnabled) && lower.startsWith('!')) {
-            await sock.sendPresenceUpdate(autoTypingEnabled ? 'composing' : 'recording', from);
-        }
-
-        // Command handling
-        if (lower === '!menu') return menuHandler.handleMenuCommand(sock, msg);
-        if (!isNaN(lower) && lower !== '0') return menuHandler.handleMenuSelection(sock, msg, lower);
-        if (lower === '!botinfo' || lower === '!status') return botInfoHandler.handleBotInfo(sock, msg);
-        if (lower === '!hello' || lower === '!hi') return generalHandler.handleHello(sock, msg);
-        if (lower === '!creator' || lower === '!owner') return generalHandler.handleCreator(sock, msg);
-        if (lower === '!ping') {
-            const start = Date.now();
-            await sock.sendMessage(from, { text: 'Pinging...' });
-            const end = Date.now();
-            return sock.sendMessage(from, { text: `Pong! Response time: ${end - start}ms` });
-        }
-        if (lower.startsWith('!say')) {
-            const text = args.join(' ') || 'Please provide text to say.';
-            return sock.sendMessage(from, { text });
-        }
-        if (lower.startsWith('!repeat')) {
-            const text = args.join(' ') || 'Please provide text to repeat.';
-            return sock.sendMessage(from, { text });
-        }
-
-        // Add the rest of your commands similarly:
-        if (lower === '!groupinfo') return groupHandler.handleGroupInfo(sock, msg);
-        if (lower.startsWith('!calculate')) return utilityHandler.handleCalculate(sock, msg, args);
-        if (lower.startsWith('!translate')) return utilityHandler.handleTranslate(sock, msg, args);
-        if (lower.startsWith('!chatbot activate')) return chatbotHandler.handleChatbotActivate(sock, msg);
-        if (lower.startsWith('!chatbot deactivate')) return chatbotHandler.handleChatbotDeactivate(sock, msg);
-        if (lower.startsWith('!weather')) return infoHandler.handleWeather(sock, msg, args);
-
-        // Admin commands (toggle features)
-        if (lower.startsWith('!autoread')) {
-            autoReadEnabled = args[0]?.toLowerCase() === 'on';
-            return sock.sendMessage(from, { text: `✅ Auto-read ${autoReadEnabled ? 'enabled' : 'disabled'}.` });
-        }
-        if (lower.startsWith('!autotyping')) {
-            autoTypingEnabled = args[0]?.toLowerCase() === 'on';
-            return sock.sendMessage(from, { text: `✅ Auto-typing ${autoTypingEnabled ? 'enabled' : 'disabled'}.` });
-        }
-        if (lower.startsWith('!autorecording')) {
-            autoRecordingEnabled = args[0]?.toLowerCase() === 'on';
-            return sock.sendMessage(from, { text: `✅ Auto-recording ${autoRecordingEnabled ? 'enabled' : 'disabled'}.` });
-        }
-
-        // Continue mapping your commands...
-    });
+  }
 }
 
-startBot();
+// --- Start the bot ---
+startWhatsAppBot().catch(err => console.error(err));
