@@ -1,9 +1,9 @@
 // In your commands/menu.js
 
-const menuText = `
-🤖 *XXX-FORCE-MD VI - Command Menu*
+//const menuText = `
+//🤖 *XXX-FORCE-MD VI - Command Menu*
 
-[Image: URL_TO_YOUR_BOT_IMAGE]
+//[Image: URL_TO_YOUR_BOT_IMAGE]
 
 *User:* User's Display Name (or "User" if not available)
 *Bot Mode:* Deactivated (initially)
@@ -260,5 +260,5 @@ async function handleMenuSelection(bot, message, selectedNumber) {
 
 module.exports = {
   handleMenuCommand,
-  handleMenuSelection,
+  handleMenuSelection,//
 };
