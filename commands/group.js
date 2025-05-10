@@ -1,686 +1,698 @@
 // In your commands/group.js
 
-async function handleGroupInfo(bot, message) {
+async function handleGroupInfo(sock, msg) {
   try {
-    const chat = await message.getChat();
+    const chat = await sock.groupMetadata(msg.key.remoteJid);
 
-    if (!chat.isGroup) {
-      await bot.sendMessage(message.from, 'This command can only be used in groups.');
+    if (!chat) {
+      await sock.sendMessage(msg.key.remoteJid, { text: 'Could not retrieve group information.' });
       return;
     }
 
     let adminList = [];
     for (let participant of chat.participants) {
-      if (participant.isAdmin) {
-        const contact = await bot.getContactById(participant.id._serialized);
-        adminList.push(`@${contact.number}`);
+      if (participant.admin === 'admin' || participant.admin === 'superadmin') {
+        adminList.push(participant.id.split(':')[0]); // Extract number part of JID
       }
     }
 
     const description = chat.description || 'No description set.';
-    const owner = chat.owner ? `@${(await bot.getContactById(chat.owner._serialized)).number}` : 'No owner info.';
+    const owner = chat.owner ? chat.owner.split(':')[0] : 'No owner info.'; // Extract number part of JID
 
     let info = `*Group Information*\n\n`;
-    info += `*Name:* ${chat.name}\n`;
-    info += `*ID:* ${chat.id._serialized}\n`;
+    info += `*Name:* ${chat.subject}\n`;
+    info += `*ID:* ${chat.id}\n`;
     info += `*Description:* ${description}\n`;
-    info += `*Owner:* ${owner}\n`;
+    info += `*Owner:* @${owner}\n`;
     info += `*Participants:* ${chat.participants.length}\n`;
     if (adminList.length > 0) {
-      info += `*Admins:* ${adminList.join(', ')}\n`;
+      info += `*Admins:* ${adminList.map(admin => `@${admin}`).join(', ')}\n`;
     } else {
       info += `*Admins:* No admins besides the owner (potentially).\n`;
     }
     try {
-      info += `*Invite Link:* ${await chat.getInviteCode()}\n`; // This might fail if the bot doesn't have permission
+      const inviteCode = await sock.groupInviteCode(msg.key.remoteJid);
+      info += `*Invite Link:* https://chat.whatsapp.com/${inviteCode}\n`;
     } catch (error) {
       info += `*Invite Link:* Could not retrieve invite link (requires permissions).\n`;
       console.error('Error getting invite code:', error);
     }
 
-    await bot.sendMessage(message.from, info, { mentions: [...adminList.map(admin => admin.replace('@', ''))] });
+    const mentions = [...adminList.map(admin => admin + '@s.whatsapp.net'), owner + '@s.whatsapp.net'].filter(Boolean);
+    await sock.sendMessage(msg.key.remoteJid, { text: info, mentions });
 
   } catch (error) {
     console.error('Error fetching group info:', error);
-    await bot.sendMessage(message.from, 'An error occurred while fetching group information.');
+    await sock.sendMessage(msg.key.remoteJid, { text: 'An error occurred while fetching group information.' });
   }
 }
 
-async function handleMentionAll(bot, message) {
+async function handleMentionAll(sock, msg) {
   try {
-    const chat = await message.getChat();
+    const metadata = await sock.groupMetadata(msg.key.remoteJid);
 
-    if (!chat.isGroup) {
-      await bot.sendMessage(message.from, 'This command can only be used in groups.');
+    if (!metadata) {
+      await sock.sendMessage(msg.key.remoteJid, { text: 'Could not retrieve group metadata.' });
       return;
     }
 
-    let mentions = [];
+    let mentions = metadata.participants.map(p => p.id);
     let tagText = '📢 *Attention All*\n\n';
 
-    for (let participant of chat.participants) {
-      const contact = await bot.getContactById(participant.id._serialized);
-      mentions.push(contact.number);
-      tagText += `@${contact.number} `;
+    for (let participant of metadata.participants) {
+      tagText += `@${participant.id.split(':')[0]} `;
     }
 
-    await bot.sendMessage(message.from, tagText.trim(), { mentions });
+    await sock.sendMessage(msg.key.remoteJid, { text: tagText.trim(), mentions });
 
   } catch (error) {
     console.error('Error mentioning all:', error);
-    await bot.sendMessage(message.from, 'An error occurred while trying to mention everyone.');
+    await sock.sendMessage(msg.key.remoteJid, { text: 'An error occurred while trying to mention everyone.' });
   }
 }
 
-async function handleRules(bot, message) {
-  const chat = await message.getChat();
-  if (!chat.isGroup) {
-    await bot.sendMessage(message.from, 'This command can only be used in groups.');
-    return;
-  }
-  // You'll need a way to store and retrieve group rules.
-  // This could be from a database, a JSON file, or even a simple variable.
+async function handleRules(sock, msg) {
+  // You'll need a way to store and retrieve group rules (e.g., from a database or JSON).
   const rules = "No spamming.\nBe respectful.\nFollow group guidelines."; // Example rules
-  await bot.sendMessage(message.from, `*Group Rules:*\n\n${rules}`);
+  await sock.sendMessage(msg.key.remoteJid, { text: `*Group Rules:*\n\n${rules}` });
 }
 
-async function handleReport(bot, message, args) {
-  const chat = await message.getChat();
-  if (!chat.isGroup) {
-    await bot.sendMessage(message.from, 'This command can only be used in groups.');
+async function handleReport(sock, msg, args) {
+  if (!msg.quotedMessage) {
+    await sock.sendMessage(msg.key.remoteJid, { text: 'Please reply to the message you want to report.' });
     return;
   }
-  if (!message.quotedMessage) {
-    await bot.sendMessage(message.from, 'Please reply to the message you want to report.');
-    return;
-  }
-  const quotedMessage = await message.getQuotedMessage();
+  const quotedMessage = await sock.loadMessage(msg.key.remoteJid, msg.quotedMessage.stanzaId);
+  const reporter = msg.key.participant || msg.key.remoteJid;
+  const reportedUser = quotedMessage?.key?.participant || quotedMessage?.key?.remoteJid;
   const reason = args.join(' ') || 'No reason provided.';
-  const reporter = message.author || message.from;
-  await bot.sendMessage(message.from, `Report sent for message from <span class="math-inline">\{quotedMessage\.author \|\| quotedMessage\.from\}\: "</span>{quotedMessage.body}" with reason: ${reason}`);
+
+  const reportText = `Report from ${reporter.split(':')[0]} regarding message from <span class="math-inline">\{reportedUser\.split\('\:'\)\[0\]\}\: "</span>{quotedMessage?.message?.conversation || quotedMessage?.message?.extendedTextMessage?.text || '(media message)'}" with reason: ${reason}`;
+  await sock.sendMessage(msg.key.remoteJid, { text: reportText });
   // You would typically log this report or notify group admins here.
 }
 
-async function handleReportAdmin(bot, message, args) {
-  const chat = await message.getChat();
-  if (!chat.isGroup) {
-    await bot.sendMessage(message.from, 'This command can only be used in groups.');
+async function handleReportAdmin(sock, msg, args) {
+  const metadata = await sock.groupMetadata(msg.key.remoteJid);
+  if (!metadata) {
+    await sock.sendMessage(msg.key.remoteJid, { text: 'Could not retrieve group metadata.' });
     return;
   }
-  const admins = chat.participants.filter(p => p.isAdmin).map(p => p.id._serialized);
+  const admins = metadata.participants.filter(p => p.admin === 'admin' || p.admin === 'superadmin').map(p => p.id);
   if (admins.length === 0) {
-    await bot.sendMessage(message.from, 'No admins found in this group.');
+    await sock.sendMessage(msg.key.remoteJid, { text: 'No admins found in this group.' });
     return;
   }
+  const reporter = msg.key.participant || msg.key.remoteJid;
   const reason = args.join(' ') || 'No reason provided.';
-  const reporter = message.author || message.from;
-  let adminMentions = [];
-  let adminTagText = `🚨 *Admin Notification*\n\nReport from ${reporter} regarding: ${reason}\n\n`;
+  let adminMentions = admins;
+  let adminTagText = `🚨 *Admin Notification*\n\nReport from @${reporter.split(':')[0]} regarding: ${reason}\n\n`;
   for (const adminId of admins) {
-    adminMentions.push(adminId);
-    adminTagText += `@${adminId.split('@')[0]} `;
+    adminTagText += `@${adminId.split(':')[0]} `;
   }
-  await bot.sendMessage(message.from, 'Admin notification sent.');
-  await bot.sendMessage(chat.id._serialized, adminTagText.trim(), { mentions: adminMentions });
+  await sock.sendMessage(msg.key.remoteJid, { text: 'Admin notification sent.' });
+  await sock.sendMessage(msg.key.remoteJid, { text: adminTagText.trim(), mentions: adminMentions });
 }
 
-async function handleLeaveGroup(bot, message) {
-  const chat = await message.getChat();
-  if (!chat.isGroup) {
-    await bot.sendMessage(message.from, 'This command can only be used in groups.');
-    return;
+async function handleLeaveGroup(sock, msg) {
+  try {
+    await sock.groupLeave(msg.key.remoteJid);
+  } catch (error) {
+    console.error('Error leaving group:', error);
+    await sock.sendMessage(msg.key.remoteJid, { text: 'Failed to leave the group.' });
   }
-  const isAdmin = chat.participants.find(p => p.id._serialized === bot.info.wid._serialized && p.isAdmin);
-  if (!isAdmin && chat.owner.user !== bot.info.wid.user) {
-    await bot.sendMessage(message.from, 'Bot must be an admin or the group owner to use this command.');
-    return;
-  }
-  await chat.leave();
 }
 
-async function handleAdd(bot, message, args) {
-  const chat = await message.getChat();
-  if (!chat.isGroup) {
-    await bot.sendMessage(message.from, 'This command can only be used in groups.');
+async function handleAdd(sock, msg, args) {
+  const metadata = await sock.groupMetadata(msg.key.remoteJid);
+  if (!metadata) {
+    await sock.sendMessage(msg.key.remoteJid, { text: 'Could not retrieve group metadata.' });
     return;
   }
-  const isAdmin = chat.participants.find(p => p.id._serialized === bot.info.wid._serialized && p.isAdmin);
-  if (!isAdmin) {
-    await bot.sendMessage(message.from, 'Bot must be an admin to use this command.');
+  const botIsAdmin = metadata.participants.find(p => p.id.split(':')[0] === sock.user.id.split(':')[0] && (p.admin === 'admin' || p.admin === 'superadmin'));
+  if (!botIsAdmin) {
+    await sock.sendMessage(msg.key.remoteJid, { text: 'Bot must be an admin to use this command.' });
     return;
   }
   if (args.length === 0) {
-    await bot.sendMessage(message.from, 'Please provide the phone number(s) to add (e.g., !add 2547xxxxxxxx).');
+    await sock.sendMessage(msg.key.remoteJid, { text: 'Please provide the phone number(s) to add (e.g., !add 2547xxxxxxxx).' });
     return;
   }
-  const numbersToAdd = args.map(arg => arg.includes('@c.us') ? arg : `${arg}@c.us`);
+  const numbersToAdd = args.map(arg => arg.startsWith('+') ? arg.replace('+', '') : arg);
+  const jidsToAdd = numbersToAdd.map(num => `${num}@s.whatsapp.net`);
   try {
-    await chat.addParticipants(numbersToAdd);
-    await bot.sendMessage(message.from, `Attempting to add ${numbersToAdd.join(', ')}.`);
+    const results = await sock.groupParticipantsUpdate(msg.key.remoteJid, jidsToAdd, 'add');
+    for (const jid in results) {
+      const result = results[jid];
+      if (result === '409') {
+        await sock.sendMessage(msg.key.remoteJid, { text: `Could not add ${jid.split('@')[0]}. User may already be in the group or have a privacy setting.` });
+      } else if (result === '200') {
+        await sock.sendMessage(msg.key.remoteJid, { text: `Successfully added ${jid.split('@')[0]}.` });
+      } else {
+        await sock.sendMessage(msg.key.remoteJid, { text: `Failed to add ${jid.split('@')[0]}. Error: ${result}` });
+      }
+    }
   } catch (error) {
     console.error('Error adding participants:', error);
-    await bot.sendMessage(message.from, 'Failed to add participants. Ensure the numbers are valid and the bot has permission.');
+    await sock.sendMessage(msg.key.remoteJid, { text: 'Failed to add participants. Ensure the numbers are valid and the bot has permission.' });
   }
 }
 
-async function handleRemove(bot, message) {
-  const chat = await message.getChat();
-  if (!chat.isGroup) {
-    await bot.sendMessage(message.from, 'This command can only be used in groups.');
+async function handleRemove(sock, msg) {
+  const metadata = await sock.groupMetadata(msg.key.remoteJid);
+  if (!metadata) {
+    await sock.sendMessage(msg.key.remoteJid, { text: 'Could not retrieve group metadata.' });
     return;
   }
-  const isAdmin = chat.participants.find(p => p.id._serialized === bot.info.wid._serialized && p.isAdmin);
-  if (!isAdmin) {
-    await bot.sendMessage(message.from, 'Bot must be an admin to use this command.');
+  const botIsAdmin = metadata.participants.find(p => p.id.split(':')[0] === sock.user.id.split(':')[0] && (p.admin === 'admin' || p.admin === 'superadmin'));
+  if (!botIsAdmin) {
+    await sock.sendMessage(msg.key.remoteJid, { text: 'Bot must be an admin to use this command.' });
     return;
   }
-  if (!message.quotedMessage) {
-    await bot.sendMessage(message.from, 'Please reply to the user you want to remove.');
+  if (!msg.quotedMessage) {
+    await sock.sendMessage(msg.key.remoteJid, { text: 'Please reply to the user you want to remove.' });
     return;
   }
-  const userToRemove = await message.getQuotedMessage().getContact();
+  const userToRemoveJid = msg.quotedMessage.key.participant || msg.quotedMessage.key.remoteJid;
   try {
-    await chat.removeParticipants([userToRemove.id._serialized]);
-    await bot.sendMessage(message.from, `Removed ${userToRemove.pushName || userToRemove.number} from the group.`);
+    const results = await sock.groupParticipantsUpdate(msg.key.remoteJid, [userToRemoveJid], 'remove');
+    if (results[userToRemoveJid] === '200') {
+      await sock.sendMessage(msg.key.remoteJid, { text: `Removed ${userToRemoveJid.split(':')[0]} from the group.` });
+    } else {
+      await sock.sendMessage(msg.key.remoteJid, { text: `Failed to remove ${userToRemoveJid.split(':')[0]}. Error: ${results[userToRemoveJid]}` });
+    }
   } catch (error) {
     console.error('Error removing participant:', error);
-    await bot.sendMessage(message.from, 'Failed to remove participant. Ensure the bot has permission.');
+    await sock.sendMessage(msg.key.remoteJid, { text: 'Failed to remove participant. Ensure the bot has permission.' });
   }
 }
 
-async function handlePromote(bot, message) {
-  const chat = await message.getChat();
-  if (!chat.isGroup) {
-    await bot.sendMessage(message.from, 'This command can only be used in groups.');
+async function handlePromote(sock, msg) {
+  const metadata = await sock.groupMetadata(msg.key.remoteJid);
+  if (!metadata) {
+    await sock.sendMessage(msg.key.remoteJid, { text: 'Could not retrieve group metadata.' });
     return;
   }
-  const isAdmin = chat.participants.find(p => p.id._serialized === bot.info.wid._serialized && p.isAdmin);
-  if (!isAdmin) {
-    await bot.sendMessage(message.from, 'Bot must be an admin to use this command.');
+  const botIsAdmin = metadata.participants.find(p => p.id.split(':')[0] === sock.user.id.split(':')[0] && (p.admin === 'admin' || p.admin === 'superadmin'));
+  if (!botIsAdmin) {
+    await sock.sendMessage(msg.key.remoteJid, { text: 'Bot must be an admin to use this command.' });
     return;
   }
-  if (!message.quotedMessage) {
-    await bot.sendMessage(message.from, 'Please reply to the user you want to promote.');
+  if (!msg.quotedMessage) {
+    await sock.sendMessage(msg.key.remoteJid, { text: 'Please reply to the user you want to promote.' });
     return;
   }
-  const userToPromote = await message.getQuotedMessage().getContact();
+  const userToPromoteJid = msg.quotedMessage.key.participant || msg.quotedMessage.key.remoteJid;
   try {
-    await chat.promoteParticipants([userToPromote.id._serialized]);
-    await bot.sendMessage(message.from, `Promoted ${userToPromote.pushName || userToPromote.number} to admin.`);
+    const results = await sock.groupParticipantsUpdate(msg.key.remoteJid, [userToPromoteJid], 'promote');
+    if (results[userToPromoteJid] === '200') {
+      await sock.sendMessage(msg.key.remoteJid, { text: `Promoted ${userToPromoteJid.split(':')[0]} to admin.` });
+    } else {
+      await sock.sendMessage(msg.key.remoteJid, { text: `Failed to promote ${userToPromoteJid.split(':')[0]}. Error: ${results[userToPromoteJid]}` });
+    }
   } catch (error) {
     console.error('Error promoting participant:', error);
-    await bot.sendMessage(message.from, 'Failed to promote participant. Ensure the bot has permission.');
+    await sock.sendMessage(msg.key.remoteJid, { text: 'Failed to promote participant. Ensure the bot has permission.' });
   }
 }
 
-async function handleDemote(bot, message) {
-  const chat = await message.getChat();
-  if (!chat.isGroup) {
-    await bot.sendMessage(message.from, 'This command can only be used in groups.');
+async function handleDemote(sock, msg) {
+  const metadata = await sock.groupMetadata(msg.key.remoteJid);
+  if (!metadata) {
+    await sock.sendMessage(msg.key.remoteJid, { text: 'Could not retrieve group metadata.' });
     return;
   }
-  const isAdmin = chat.participants.find(p => p.id._serialized === bot.info.wid._serialized && p.isAdmin);
-  if (!isAdmin) {
-    await bot.sendMessage(message.from, 'Bot must be an admin to use this command.');
+  const botIsAdmin = metadata.participants.find(p => p.id.split(':')[0] === sock.user.id.split(':')[0] && (p.admin === 'admin' || p.admin === 'superadmin'));
+  if (!botIsAdmin) {
+    await sock.sendMessage(msg.key.remoteJid, { text: 'Bot must be an admin to use this command.' });
     return;
   }
-  if (!message.quotedMessage) {
-    await bot.sendMessage(message.from, 'Please reply to the user you want to demote.');
+  if (!msg.quotedMessage) {
+    await sock.sendMessage(msg.key.remoteJid, { text: 'Please reply to the user you want to demote.' });
     return;
   }
-  const userToDemote = await message.getQuotedMessage().getContact();
+  const userToDemoteJid = msg.quotedMessage.key.participant || msg.quotedMessage.key.remoteJid;
   try {
-    await chat.demoteParticipants([userToDemote.id._serialized]);
-    await bot.sendMessage(message.from, `Demoted ${userToDemote.pushName || userToDemote.number} from admin.`);
+    const results = await sock.groupParticipantsUpdate(msg.key.remoteJid, [userToDemoteJid], 'demote');
+    if (results[userToDemoteJid] === '200') {
+      await sock.sendMessage(msg.key.remoteJid, { text: `Demoted ${userToDemoteJid.split(':')[0]} from admin.` });
+    } else {
+      await sock.sendMessage(msg.key.remoteJid, { text: `Failed to demote ${userToDemoteJid.split(':')[0]}. Error: ${results[userToDemoteJid]}` });
+    }
   } catch (error) {
     console.error('Error demoting participant:', error);
-    await bot.sendMessage(message.from, 'Failed to demote participant. Ensure the bot has permission.');
+    await sock.sendMessage(msg.key.remoteJid, { text: 'Failed to demote participant. Ensure the bot has permission.' });
   }
 }
 
-async function handleSetName(bot, message, args) {
-  const chat = await message.getChat();
-  if (!chat.isGroup) {
-    await bot.sendMessage(message.from, 'This command can only be used in groups.');
+async function handleSetName(sock, msg, args) {
+  const metadata = await sock.groupMetadata(msg.key.remoteJid);
+  if (!metadata) {
+    await sock.sendMessage(msg.key.remoteJid, { text: 'Could not retrieve group metadata.' });
     return;
   }
-  const isAdmin = chat.participants.find(p => p.id._serialized === bot.info.wid._serialized && p.isAdmin);
-  if (!isAdmin) {
-    await bot.sendMessage(message.from, 'Bot must be an admin to use this command.');
+  const botIsAdmin = metadata.participants.find(p => p.id.split(':')[0] === sock.user.id.split(':')[0] && (p.admin === 'admin' || p.admin === 'superadmin'));
+  if (!botIsAdmin) {
+    await sock.sendMessage(msg.key.remoteJid, { text: 'Bot must be an admin to use this command.' });
     return;
   }
   const newName = args.join(' ');
   if (!newName) {
-    await bot.sendMessage(message.from, 'Please provide a new group name.');
+    await sock.sendMessage(msg.key.remoteJid, { text: 'Please provide a new group name.' });
     return;
   }
   try {
-    await chat.setName(newName);
-    await bot.sendMessage(message.from, `Group name updated to: ${newName}`);
+    await sock.groupUpdateSubject(msg.key.remoteJid, newName);
+    await sock.sendMessage(msg.key.remoteJid, { text: `Group name updated to: ${newName}` });
   } catch (error) {
     console.error('Error setting group name:', error);
-    await bot.sendMessage(message.from, 'Failed to set group name. Ensure the bot has permission.');
+    await sock.sendMessage(msg.key.remoteJid, { text: 'Failed to set group name. Ensure the bot has permission.' });
   }
 }
 
-async function handleSetDescription(bot, message, args) {
-  const chat = await message.getChat();
-  if (!chat.isGroup) {
-    await bot.sendMessage(message.from, 'This command can only be used in groups.');
+async function handleSetDescription(sock, msg, args) {
+  const metadata = await sock.groupMetadata(msg.key.remoteJid);
+  if (!metadata) {
+    await sock.sendMessage(msg.key.remoteJid, { text: 'Could not retrieve group metadata.' });
     return;
   }
-  const isAdmin = chat.participants.find(p => p.id._serialized === bot.info.wid._serialized && p.isAdmin);
-  if (!isAdmin) {
-    await bot.sendMessage(message.from, 'Bot must be an admin to use this command.');
+  const botIsAdmin = metadata.participants.find(p => p.id.split(':')[0] === sock.user.id.split(':')[0] && (p.admin === 'admin' || p.admin === 'superadmin'));
+  if (!botIsAdmin) {
+    await sock.sendMessage(msg.key.remoteJid, { text: 'Bot must be an admin to use this command.' });
     return;
   }
   const newDescription = args.join(' ');
   try {
-    await chat.setDescription(newDescription);
-    await bot.sendMessage(message.from, `Group description updated to: ${newDescription}`);
+    await sock.groupUpdateDescription(msg.key.remoteJid, newDescription);
+    await sock.sendMessage(msg.key.remoteJid, { text: `Group description updated to: ${newDescription}` });
   } catch (error) {
     console.error('Error setting group description:', error);
-    await bot.sendMessage(message.from, 'Failed to set group description. Ensure the bot has permission.');
+    await sock.sendMessage(msg.key.remoteJid, { text: 'Failed to set group description. Ensure the bot has permission.' });
   }
-}
+}// In your commands/group.js (continued)
 
-async function handlePin(bot, message) {
-  const chat = await message.getChat();
-  if (!chat.isGroup) {
-    await bot.sendMessage(message.from, 'This command can only be used in groups.');
+async function handlePin(sock, msg) {
+  const metadata = await sock.groupMetadata(msg.key.remoteJid);
+  if (!metadata) {
+    await sock.sendMessage(msg.key.remoteJid, { text: 'Could not retrieve group metadata.' });
     return;
   }
-  const isAdmin = chat.participants.find(p => p.id._serialized === bot.info.wid._serialized && p.isAdmin);
-  if (!isAdmin) {
-    await bot.sendMessage(message.from, 'Bot must be an admin to use this command.');
+  const botIsAdmin = metadata.participants.find(p => p.id.split(':')[0] === sock.user.id.split(':')[0] && (p.admin === 'admin' || p.admin === 'superadmin'));
+  if (!botIsAdmin) {
+    await sock.sendMessage(msg.key.remoteJid, { text: 'Bot must be an admin to use this command.' });
     return;
   }
-  if (!message.quotedMessage) {
-    await bot.sendMessage(message.from, 'Please reply to the message you want to pin.');
+  if (!msg.quotedMessage) {
+    await sock.sendMessage(msg.key.remoteJid, { text: 'Please reply to the message you want to pin.' });
     return;
   }
   try {
-    await message.quotedMessage.pin(true);
-    await bot.sendMessage(message.from, 'Message pinned successfully.');
+    await sock.chatModify({ pin: true }, msg.quotedMessage.key);
+    await sock.sendMessage(msg.key.remoteJid, { text: 'Message pinned successfully.' });
   } catch (error) {
     console.error('Error pinning message:', error);
-    await bot.sendMessage(message.from, 'Failed to pin message. Ensure the bot has permission.');
+    await sock.sendMessage(msg.key.remoteJid, { text: 'Failed to pin message. Ensure the bot has permission.' });
   }
 }
 
-async function handleUnpin(bot, message) {
-  const chat = await message.getChat();
-  if (!chat.isGroup) {
-    await bot.sendMessage(message.from, 'This command can only be used in groups.');
+async function handleUnpin(sock, msg) {
+  const metadata = await sock.groupMetadata(msg.key.remoteJid);
+  if (!metadata) {
+    await sock.sendMessage(msg.key.remoteJid, { text: 'Could not retrieve group metadata.' });
     return;
   }
-  const isAdmin = chat.participants.find(p => p.id._serialized === bot.info.wid._serialized && p.isAdmin);
-  if (!isAdmin) {
-    await bot.sendMessage(message.from, 'Bot must be an admin to use this command.');
+  const botIsAdmin = metadata.participants.find(p => p.id.split(':')[0] === sock.user.id.split(':')[0] && (p.admin === 'admin' || p.admin === 'superadmin'));
+  if (!botIsAdmin) {
+    await sock.sendMessage(msg.key.remoteJid, { text: 'Bot must be an admin to use this command.' });
     return;
   }
   try {
-    await chat.unpinMessage(); // Unpins the currently pinned message
-    await bot.sendMessage(message.from, 'Message unpinned successfully.');
+    await sock.chatModify({ pin: false }, await sock.fetchPinnedMessage(msg.key.remoteJid));
+    await sock.sendMessage(msg.key.remoteJid, { text: 'Message unpinned successfully.' });
   } catch (error) {
     console.error('Error unpinning message:', error);
-    await bot.sendMessage(message.from, 'Failed to unpin message. Ensure there is a message pinned and the bot has permission.');
+    await sock.sendMessage(msg.key.remoteJid, { text: 'Failed to unpin message. Ensure there is a message pinned and the bot has permission.' });
   }
 }
 
-async function handleWarn(bot, message, args) {
-  const chat = await message.getChat();
-  if (!chat.isGroup) {
-    await bot.sendMessage(message.from, 'This command can only be used in groups.');
+async function handleWarn(sock, msg, args) {
+  const metadata = await sock.groupMetadata(msg.key.remoteJid);
+  if (!metadata) {
+    await sock.sendMessage(msg.key.remoteJid, { text: 'Could not retrieve group metadata.' });
     return;
   }
-  const isAdmin = chat.participants.find(p => p.id._serialized === bot.info.wid._serialized && p.isAdmin);
-  if (!isAdmin) {
-    await bot.sendMessage(message.from, 'Bot must be an admin to use this command.');
+  const botIsAdmin = metadata.participants.find(p => p.id.split(':')[0] === sock.user.id.split(':')[0] && (p.admin === 'admin' || p.admin === 'superadmin'));
+  if (!botIsAdmin) {
+    await sock.sendMessage(msg.key.remoteJid, { text: 'Bot must be an admin to use this command.' });
     return;
   }
-  if (!message.quotedMessage) {
-    await bot.sendMessage(message.from, 'Please reply to the user you want to warn.');
+  if (!msg.quotedMessage) {
+    await sock.sendMessage(msg.key.remoteJid, { text: 'Please reply to the user you want to warn.' });
     return;
   }
-  const userToWarn = await message.getQuotedMessage().getContact();
+  const userToWarnJid = msg.quotedMessage.key.participant || msg.quotedMessage.key.remoteJid;
   const reason = args.join(' ') || 'No reason provided.';
   // You'll need a system to store and track warnings (e.g., in your data/group-settings.json).
-  // For simplicity, we'll just send a message for now.
-  await bot.sendMessage(message.from, `${userToWarn.pushName || userToWarn.number} warned for: ${reason}`);
+  await sock.sendMessage(msg.key.remoteJid, { text: `@${userToWarnJid.split(':')[0]} warned for: ${reason}`, mentions: [userToWarnJid] });
   // Implement your warning storage and tracking logic here.
 }
 
-async function handleMute(bot, message, args) {
-  const chat = await message.getChat();
-  if (!chat.isGroup) {
-    await bot.sendMessage(message.from, 'This command can only be used in groups.');
+async function handleMute(sock, msg, args) {
+  const metadata = await sock.groupMetadata(msg.key.remoteJid);
+  if (!metadata) {
+    await sock.sendMessage(msg.key.remoteJid, { text: 'Could not retrieve group metadata.' });
     return;
   }
-  const isAdmin = chat.participants.find(p => p.id._serialized === bot.info.wid._serialized && p.isAdmin);
-  if (!isAdmin) {
-    await bot.sendMessage(message.from, 'Bot must be an admin to use this command.');
+  const botIsAdmin = metadata.participants.find(p => p.id.split(':')[0] === sock.user.id.split(':')[0] && (p.admin === 'admin' || p.admin === 'superadmin'));
+  if (!botIsAdmin) {
+    await sock.sendMessage(msg.key.remoteJid, { text: 'Bot must be an admin to use this command.' });
     return;
   }
-  if (!message.quotedMessage) {
-    await bot.sendMessage(message.from, 'Please reply to the user you want to mute.');
+  if (!msg.quotedMessage) {
+    await sock.sendMessage(msg.key.remoteJid, { text: 'Please reply to the user you want to mute.' });
     return;
   }
-  const userToMute = await message.getQuotedMessage().getContact();
-  const duration = args[0] || 'temporary'; // Example: !// ... (previous group command handlers)
+  const userToMuteJid = msg.quotedMessage.key.participant || msg.quotedMessage.key.remoteJid;
+  const duration = args[0] || 'temporary'; // You'll need to implement actual muting logic
+  await sock.sendMessage(msg.key.remoteJid, { text: `@${userToMuteJid.split(':')[0]} muted for: ${duration}`, mentions: [userToMuteJid] });
+  // Implement actual mute functionality (this often involves managing user permissions or using a separate mechanism).
+}
 
-async function handleUnmute(bot, message) {
-  const chat = await message.getChat();
-  if (!chat.isGroup) {
-    await bot.sendMessage(message.from, 'This command can only be used in groups.');
+async function handleUnmute(sock, msg) {
+  const metadata = await sock.groupMetadata(msg.key.remoteJid);
+  if (!metadata) {
+    await sock.sendMessage(msg.key.remoteJid, { text: 'Could not retrieve group metadata.' });
     return;
   }
-  const isAdmin = chat.participants.find(p => p.id._serialized === bot.info.wid._serialized && p.isAdmin);
-  if (!isAdmin) {
-    await bot.sendMessage(message.from, 'Bot must be an admin to use this command.');
+  const botIsAdmin = metadata.participants.find(p => p.id.split(':')[0] === sock.user.id.split(':')[0] && (p.admin === 'admin' || p.admin === 'superadmin'));
+  if (!botIsAdmin) {
+    await sock.sendMessage(msg.key.remoteJid, { text: 'Bot must be an admin to use this command.' });
     return;
   }
-  if (!message.quotedMessage) {
-    await bot.sendMessage(message.from, 'Please reply to the user you want to unmute.');
+  if (!msg.quotedMessage) {
+    await sock.sendMessage(msg.key.remoteJid, { text: 'Please reply to the user you want to unmute.' });
     return;
   }
-  const userToUnmute = await message.getQuotedMessage().getContact();
+  const userToUnmuteJid = msg.quotedMessage.key.participant || msg.quotedMessage.key.remoteJid;
   // Implement your unmute functionality here.
-  await bot.sendMessage(message.from, `${userToUnmute.pushName || userToUnmute.number} unmuted.`);
+  await sock.sendMessage(msg.key.remoteJid, { text: `@${userToUnmuteJid.split(':')[0]} unmuted.`, mentions: [userToUnmuteJid] });
   // Implement actual unmute logic.
 }
 
-async function handleAdminOnly(bot, message, args) {
-  const chat = await message.getChat();
-  if (!chat.isGroup) {
-    await bot.sendMessage(message.from, 'This command can only be used in groups.');
+async function handleAdminOnly(sock, msg, args) {
+  const metadata = await sock.groupMetadata(msg.key.remoteJid);
+  if (!metadata) {
+    await sock.sendMessage(msg.key.remoteJid, { text: 'Could not retrieve group metadata.' });
     return;
   }
-  const isAdmin = chat.participants.find(p => p.id._serialized === bot.info.wid._serialized && p.isAdmin);
-  if (!isAdmin) {
-    await bot.sendMessage(message.from, 'Bot must be an admin to use this command.');
+  const botIsAdmin = metadata.participants.find(p => p.id.split(':')[0] === sock.user.id.split(':')[0] && (p.admin === 'admin' || p.admin === 'superadmin'));
+  if (!botIsAdmin) {
+    await sock.sendMessage(msg.key.remoteJid, { text: 'Bot must be an admin to use this command.' });
     return;
   }
   const setting = args[0] ? args[0].toLowerCase() : '';
-  // You'll need a way to store this setting (e.g., in data/group-settings.json).
+  // You'll need a way to store this setting per group.
   if (setting === 'on') {
-    await bot.sendMessage(message.from, 'Bot commands are now restricted to admins.');
-    // Implement logic to check admin status for other commands.
+    await sock.sendMessage(msg.key.remoteJid, { text: 'Bot commands are now restricted to admins.' });
+    // Implement logic in your message listener to check admin status for other commands.
   } else if (setting === 'off') {
-    await bot.sendMessage(message.from, 'Bot commands are now available to all members.');
+    await sock.sendMessage(msg.key.remoteJid, { text: 'Bot commands are now available to all members.' });
     // Implement logic to allow all members to use commands.
   } else {
-    await bot.sendMessage(message.from, 'Usage: !adminonly on/off');
+    await sock.sendMessage(msg.key.remoteJid, { text: 'Usage: !adminonly on/off' });
   }
 }
 
-async function handleAntiSticker(bot, message, args) {
-  const chat = await message.getChat();
-  if (!chat.isGroup) {
-    await bot.sendMessage(message.from, 'This command can only be used in groups.');
+async function handleAntiSticker(sock, msg, args) {
+  const metadata = await sock.groupMetadata(msg.key.remoteJid);
+  if (!metadata) {
+    await sock.sendMessage(msg.key.remoteJid, { text: 'Could not retrieve group metadata.' });
     return;
   }
-  const isAdmin = chat.participants.find(p => p.id._serialized === bot.info.wid._serialized && p.isAdmin);
-  if (!isAdmin) {
-    await bot.sendMessage(message.from, 'Bot must be an admin to use this command.');
+  const botIsAdmin = metadata.participants.find(p => p.id.split(':')[0] === sock.user.id.split(':')[0] && (p.admin === 'admin' || p.admin === 'superadmin'));
+  if (!botIsAdmin) {
+    await sock.sendMessage(msg.key.remoteJid, { text: 'Bot must be an admin to use this command.' });
     return;
   }
   const setting = args[0] ? args[0].toLowerCase() : '';
   // Store this setting per group.
   if (setting === 'on') {
-    await bot.sendMessage(message.from, 'Anti-sticker is now enabled.');
+    await sock.sendMessage(msg.key.remoteJid, { text: 'Anti-sticker is now enabled.' });
     // Implement logic in your message listener to delete stickers.
   } else if (setting === 'off') {
-    await bot.sendMessage(message.from, 'Anti-sticker is now disabled.');
+    await sock.sendMessage(msg.key.remoteJid, { text: 'Anti-sticker is now disabled.' });
     // Remove the sticker deletion logic.
   } else {
-    await bot.sendMessage(message.from, 'Usage: !antisticker on/off');
+    await sock.sendMessage(msg.key.remoteJid, { text: 'Usage: !antisticker on/off' });
   }
 }
 
-async function handleAntiLink(bot, message, args) {
-  const chat = await message.getChat();
-  if (!chat.isGroup) {
-    await bot.sendMessage(message.from, 'This command can only be used in groups.');
+async function handleAntiLink(sock, msg, args) {
+  const metadata = await sock.groupMetadata(msg.key.remoteJid);
+  if (!metadata) {
+    await sock.sendMessage(msg.key.remoteJid, { text: 'Could not retrieve group metadata.' });
     return;
   }
-  const isAdmin = chat.participants.find(p => p.id._serialized === bot.info.wid._serialized && p.isAdmin);
-  if (!isAdmin) {
-    await bot.sendMessage(message.from, 'Bot must be an admin to use this command.');
+  const botIsAdmin = metadata.participants.find(p => p.id.split(':')[0] === sock.user.id.split(':')[0] && (p.admin === 'admin' || p.admin === 'superadmin'));
+  if (!botIsAdmin) {
+    await sock.sendMessage(msg.key.remoteJid, { text: 'Bot must be an admin to use this command.' });
     return;
   }
   const setting = args[0] ? args[0].toLowerCase() : '';
   // Store this setting per group.
   if (setting === 'on') {
-    await bot.sendMessage(message.from, 'Anti-link is now enabled.');
+    await sock.sendMessage(msg.key.remoteJid, { text: 'Anti-link is now enabled.' });
     // Implement logic in your message listener to detect and delete links.
   } else if (setting === 'off') {
-    await bot.sendMessage(message.from, 'Anti-link is now disabled.');
+    await sock.sendMessage(msg.key.remoteJid, { text: 'Anti-link is now disabled.' });
     // Remove the link detection logic.
   } else {
-    await bot.sendMessage(message.from, 'Usage: !antilink on/off');
+    await sock.sendMessage(msg.key.remoteJid, { text: 'Usage: !antilink on/off' });
   }
 }
 
-async function handleKillGround(bot, message) {
-  const chat = await message.getChat();
-  if (!chat.isGroup) {
-    await bot.sendMessage(message.from, 'This command can only be used in groups.');
+async function handleKillGround(sock, msg) {
+  const metadata = await sock.groupMetadata(msg.key.remoteJid);
+  if (!metadata) {
+    await sock.sendMessage(msg.key.remoteJid, { text: 'Could not retrieve group metadata.' });
     return;
   }
-  const isOwner = chat.owner.user === bot.info.wid.user;
+  const isOwner = metadata.owner?.split(':')[0] === sock.user.id.split(':')[0];
   if (!isOwner) {
-    await bot.sendMessage(message.from, 'Only the group owner can use this command!');
+    await sock.sendMessage(msg.key.remoteJid, { text: 'Only the group owner can use this command!' });
     return;
   }
-  const participantsToRemove = chat.participants
-    .filter(p => !p.isAdmin && p.id._serialized !== bot.info.wid._serialized)
-    .map(p => p.id._serialized);
+  const participantsToRemove = metadata.participants
+    .filter(p => !(p.admin === 'admin' || p.admin === 'superadmin') && p.id.split(':')[0] !== sock.user.id.split(':')[0])
+    .map(p => p.id);
 
   if (participantsToRemove.length > 0) {
     try {
-      await chat.removeParticipants(participantsToRemove);
-      await bot.sendMessage(message.from, 'Initiating removal of all non-admin members...');
+      const results = await sock.groupParticipantsUpdate(msg.key.remoteJid, participantsToRemove, 'remove');
+      for (const jid in results) {
+        if (results[jid] === '200') {
+          await sock.sendMessage(msg.key.remoteJid, { text: `Removed ${jid.split(':')[0]}.` });
+        } else {
+          console.warn(`Failed to remove ${jid}:`, results[jid]);
+        }
+      }
+      await sock.sendMessage(msg.key.remoteJid, { text: 'Initiating removal of all non-admin members...' });
     } catch (error) {
       console.error('Error removing all members:', error);
-      await bot.sendMessage(message.from, 'Failed to remove members. Ensure the bot has sufficient permissions.');
+      await sock.sendMessage(msg.key.remoteJid, { text: 'Failed to remove members. Ensure the bot has sufficient permissions.' });
     }
   } else {
-    await bot.sendMessage(message.from, 'No non-admin members found to remove.');
+    await sock.sendMessage(msg.key.remoteJid, { text: 'No non-admin members found to remove.' });
   }
 }
 
-async function handleAntiBot(bot, message, args) {
-  const chat = await message.getChat();
-  if (!chat.isGroup) {
-    await bot.sendMessage(message.from, 'This command can only be used in groups.');
+async function handleAntiBot(sock, msg, args) {
+  const metadata = await sock.groupMetadata(msg.key.remoteJid);
+  if (!metadata) {
+    await sock.sendMessage(msg.key.remoteJid, { text: 'Could not retrieve group metadata.' });
     return;
   }
-  const isAdmin = chat.participants.find(p => p.id._serialized === bot.info.wid._serialized && p.isAdmin);
-  if (!isAdmin) {
-    await bot.sendMessage(message.from, 'Bot must be an admin to use this command.');
+  const botIsAdmin = metadata.participants.find(p => p.id.split(':')[0] === sock.user.id.split(':')[0] && (p.admin === 'admin' || p.admin === 'superadmin'));
+  if (!botIsAdmin) {
+    await sock.sendMessage(msg.key.remoteJid, { text: 'Bot must be an admin to use this command.' });
     return;
   }
   const setting = args[0] ? args[0].toLowerCase() : '';
   // Store this setting per group.
   if (setting === 'on') {
-    await bot.sendMessage(message.from, 'Anti-bot is now enabled.');
-    // Implement logic to identify and potentially remove other bots.
+    await sock.sendMessage(msg.key.remoteJid, { text: 'Anti-bot is now enabled.' });
+    // Implement logic in your message listener to identify and potentially remove other bots. This is complex and might involve heuristics.
   } else if (setting === 'off') {
-    await bot.sendMessage(message.from, 'Anti-bot is now disabled.');
+    await sock.sendMessage(msg.key.remoteJid, { text: 'Anti-bot is now disabled.' });
     // Remove the anti-bot logic.
   } else {
-    await bot.sendMessage(message.from, 'Usage: !antibot on/off');
+    await sock.sendMessage(msg.key.remoteJid, { text: 'Usage: !antibot on/off' });
   }
 }
 
-async function handleWelcome(bot, message, args) {
-  const chat = await message.getChat();
-  if (!chat.isGroup) {
-    await bot.sendMessage(message.from, 'This command can only be used in groups.');
+async function handleWelcome(sock, msg, args) {
+  const metadata = await sock.groupMetadata(msg.key.remoteJid);
+  if (!metadata) {
+    await sock.sendMessage(msg.key.remoteJid, { text: 'Could not retrieve group metadata.' });
     return;
   }
-  const isAdmin = chat.participants.find(p => p.id._serialized === bot.info.wid._serialized && p.isAdmin);
-  if (!isAdmin) {
-    await bot.sendMessage(message.from, 'Bot must be an admin to use this command.');
+  const botIsAdmin = metadata.participants.find(p => p.id.split(':')[0] === sock.user.id.split(':')[0] && (p.admin === 'admin' || p.admin === 'superadmin'));
+  if (!botIsAdmin) {
+    await sock.sendMessage(msg.key.remoteJid, { text: 'Bot must be an admin to use this command.' });
     return;
   }
   const welcomeMessage = args.join(' ');
   if (!welcomeMessage) {
-    await bot.sendMessage(message.from, 'Please provide a welcome message.');
+    await sock.sendMessage(msg.key.remoteJid, { text: 'Please provide a welcome message.' });
     return;
   }
   // Store this welcome message per group.
-  await bot.sendMessage(message.from, `Welcome message set to: ${welcomeMessage}`);
-  // Implement logic in your group join listener to send this message to new members.
+  await sock.sendMessage(msg.key.remoteJid, { text: `Welcome message set to: ${welcomeMessage}` });
+  // Implement logic in your group join listener (in index.js) to send this message to new members.
 }
 
-async function handlePoll(bot, message, args) {
-  const chat = await message.getChat();
-  if (!chat.isGroup) {
-    await bot.sendMessage(message.from, 'This command can only be used in groups.');
-    return;
-  }
+async function handlePoll(sock, msg, args) {
   const [question, ...options] = args.join(' ').split(',');
   if (!question || options.length < 2) {
-    await bot.sendMessage(message.from, 'Usage: !poll [question], [option1], [option2], ...');
+    await sock.sendMessage(msg.key.remoteJid, { text: 'Usage: !poll [question], [option1], [option2], ...' });
     return;
   }
   const trimmedOptions = options.map(opt => opt.trim());
   let pollText = `📊 *Poll: ${question.trim()}*\n\n`;
-  trimmedOptions.forEach((option, index) => {
-    pollText += `${String.fromCharCode(0x1F1A + index)} ${option}\n`; // A, B, C... emojis
-  });
-  await bot.sendMessage(message.from, pollText);
-  // You might want to implement actual poll tracking if needed.
+  const reactions = ['🇦', '🇧', '🇨', '🇩', '🇪', '🇫', '🇬', '🇭', '🇮', '🇯']; // Up to 10 options
+  for (let i = 0; i < Math.min(trimmedOptions.length, reactions.length); i++) {
+    pollText += `${reactions[i]} ${trimmedOptions[i]}\n`;
+  }
+  await sock.sendMessage(msg.key.remoteJid, { text: pollText });
+  // You might want to implement actual poll tracking if needed, possibly using message reactions.
 }
 
-async function handleAnnounce(bot, message, args) {
-  const chat = await message.getChat();
-  if (!chat.isGroup) {
-    await bot.sendMessage(message.from, 'This command can only be used in groups.');
+async function handleAnnounce(sock, msg, args) {
+  const metadata = await sock.groupMetadata(msg.key.remoteJid);
+  if (!metadata) {
+    await sock.sendMessage(msg.key.remoteJid, { text: 'Could not retrieve group metadata.' });
+    return;
+  }
+  const botIsAdmin = metadata.participants.find(p => p.id.
+
+async function handle// In your commands/group.js (continued)
+
+async function handleAnnounce(sock, msg, args) {
+  const metadata = await sock.groupMetadata(msg.key.remoteJid);
+  if (!metadata) {
+    await sock.sendMessage(msg.key.remoteJid, { text: 'Could not retrieve group metadata.' });
+    return;
+  }
+  const botIsAdmin = metadata.participants.find(p => p.id.split(':')[0] === sock.user.id.split(':')[0] && (p.admin === 'admin' || p.admin === 'superadmin'));
+  if (!botIsAdmin) {
+    await sock.sendMessage(msg.key.remoteJid, { text: 'Bot must be an admin to use this command.' });
     return;
   }
   const announcement = args.join(' ');
   if (!announcement) {
-    await bot.sendMessage(message.from, 'Please provide the announcement message.');
+    await sock.sendMessage(msg.key.remoteJid, { text: 'Please provide the announcement message.' });
     return;
   }
-  await bot.sendMessage(chat.id._serialized, `📢 *Announcement:*\n\n${announcement}`);
+  await sock.sendMessage(msg.key.remoteJid, { text: `📢 *Announcement:*\n\n${announcement}` });
 }
 
-async function handleFind(bot, message, args) {
-  const chat = await message.getChat();
-  if (!chat.isGroup) {
-    await bot.sendMessage(message.from, 'This command can only be used in groups.');
-    return;
-  }
+async function handleFind(sock, msg, args) {
   const keyword = args.join(' ');
   if (!keyword) {
-    await bot.sendMessage(message.from, 'Please provide a keyword to search for.');
+    await sock.sendMessage(msg.key.remoteJid, { text: 'Please provide a keyword to search for.' });
     return;
   }
-  // This is a complex operation and might be resource-intensive.
-  // You would typically need to iterate through the chat history.
-  await bot.sendMessage(message.from, `Searching for messages containing "${keyword}"... (This might take a while or is not fully implemented).`);
-  // Implement your chat history search logic here.
+  await sock.sendMessage(msg.key.remoteJid, { text: `Searching for messages containing "${keyword}"... (This feature is complex and might be resource-intensive or not fully implemented).` });
+  // Implementing a full chat history search requires storing and indexing messages, which is beyond the scope of basic command handling.
 }
-// In your commands/group.js
 
-// ... (other group command handlers)
-
-async function handleBanGroup(bot, message, args) {
-  if (!await isAdmin(bot, message)) {
-    await bot.sendMessage(message.from, '🚫 This command is only for group admins.');
+async function handleBanGroup(sock, msg, args) {
+  const metadata = await sock.groupMetadata(msg.key.remoteJid);
+  if (!metadata) {
+    await sock.sendMessage(msg.key.remoteJid, { text: 'Could not retrieve group metadata.' });
+    return;
+  }
+  const botIsAdmin = metadata.participants.find(p => p.id.split(':')[0] === sock.user.id.split(':')[0] && (p.admin === 'admin' || p.admin === 'superadmin'));
+  if (!botIsAdmin) {
+    await sock.sendMessage(msg.key.remoteJid, { text: '🚫 This command is only for group admins.' });
     return;
   }
 
-  if (!args[0]) {
-    await bot.sendMessage(message.from, 'Please provide the group invite link (e.g., !bangroup https://chat.whatsapp.com/...).');
+  if (!args[0]?.startsWith('https://chat.whatsapp.com/')) {
+    await sock.sendMessage(msg.key.remoteJid, { text: 'Please provide a valid WhatsApp group invite link (e.g., !bangroup https://chat.whatsapp.com/...).' });
     return;
   }
 
   const inviteLink = args[0];
-  const groupIdFromLink = await bot.groupInviteInfo(inviteLink).catch(() => null);
-
-  if (!groupIdFromLink || !groupIdFromLink.id) {
-    await bot.sendMessage(message.from, '⚠️ Could not retrieve group information from the provided link. Make sure the link is valid and the bot can access it.');
-    return;
-  }
-
-  const groupId = groupIdFromLink.id;
-  const chat = await bot.getChatById(groupId);
-
-  if (!chat.isGroup) {
-    await bot.sendMessage(message.from, '⚠️ The provided link does not seem to be for a group.');
-    return;
-  }
-
-  await bot.sendMessage(message.from, `🔒 Attempting to ban group: ${chat.name || groupId}...`);
-
   try {
+    const groupInfo = await sock.groupGetInviteInfo(inviteLink);
+    const groupId = groupInfo.id;
+    const groupMetadataToBan = await sock.groupMetadata(groupId);
+
+    if (!groupMetadataToBan) {
+      await sock.sendMessage(msg.key.remoteJid, { text: '⚠️ Could not retrieve group information from the provided link.' });
+      return;
+    }
+
+    await sock.sendMessage(msg.key.remoteJid, { text: `🔒 Attempting to ban group: ${groupMetadataToBan.subject || groupId}...` });
+
     // 1. Restrict sending to admins only
-    await chat.setOnlyAdminSendTextMessage(true);
-    await chat.setOnlyAdminSendMediaMessage(true);
+    await sock.groupUpdateSettings(groupId, { restrict: 'admins_only' });
 
     // 2. Remove all non-admin participants
-    const participants = chat.participants;
-    const adminJids = participants.filter(p => p.isAdmin).map(p => p.id._serialized);
+    const participantsToRemove = groupMetadataToBan.participants
+      .filter(p => !(p.admin === 'admin' || p.admin === 'superadmin') && p.id.split(':')[0] !== sock.user.id.split(':')[0])
+      .map(p => p.id);
 
-    for (const participant of participants) {
-      if (!participant.isAdmin && participant.id._serialized !== bot.info.wid._serialized) {
-        await chat.removeParticipants([participant.id._serialized]);
+    if (participantsToRemove.length > 0) {
+      const removalResults = await sock.groupParticipantsUpdate(groupId, participantsToRemove, 'remove');
+      for (const jid in removalResults) {
+        if (removalResults[jid] !== '200') {
+          console.warn(`Failed to remove ${jid}:`, removalResults[jid]);
+        }
       }
     }
 
-    // 3. Revoke the invite link (if possible - might require specific permissions)
-    try {
-      await bot.revokeGroupInvite(groupId);
-      await bot.sendMessage(message.from, '🔗 Invite link revoked.');
-    } catch (revokeError) {
-      console.error('Error revoking invite link:', revokeError);
-      await bot.sendMessage(message.from, '⚠️ Could not revoke the invite link. Ensure the bot has the necessary permissions.');
-    }
+    // 3. Revoke the invite link
+    await sock.groupRevokeInvite(groupId);
+    await sock.sendMessage(msg.key.remoteJid, { text: '🔗 Invite link revoked.' });
 
-    await bot.sendMessage(message.from, `✅ Group "${chat.name || groupId}" has been effectively banned (restricted to admins).`);
+    await sock.sendMessage(msg.key.remoteJid, `✅ Group "${groupMetadataToBan.subject || groupId}" has been effectively banned (restricted to admins).`);
 
   } catch (error) {
     console.error('Error banning group:', error);
-    await bot.sendMessage(message.from, `❌ Failed to ban group "${chat.name || groupId}". An error occurred.`);
+    await sock.sendMessage(msg.key.remoteJid, `❌ Failed to ban group. An error occurred: ${error.message}`);
   }
 }
 
-// Helper function to check if the sender is a group admin
-async function isAdmin(bot, message) {
-  if (message.fromMe) return true; // Bot is always an admin
-  const chat = await message.getChat();
-  if (!chat.isGroup) return false;
-  const participant = chat.participants.find(p => p.id._serialized === message.author);
-  return participant && participant.isAdmin;
-}
-
-async function handleApproveJoin(bot, message, args) {
-  if (!await isAdmin(bot, message)) {
-    await bot.sendMessage(message.from, '🚫 Admin command only.');
+async function handleApproveJoin(sock, msg, args) {
+  const metadata = await sock.groupMetadata(msg.key.remoteJid);
+  if (!metadata) {
+    await sock.sendMessage(msg.key.remoteJid, { text: 'Could not retrieve group metadata.' });
+    return;
+  }
+  const botIsAdmin = metadata.participants.find(p => p.id.split(':')[0] === sock.user.id.split(':')[0] && (p.admin === 'admin' || p.admin === 'superadmin'));
+  if (!botIsAdmin) {
+    await sock.sendMessage(msg.key.remoteJid, { text: '🚫 Admin command only.' });
     return;
   }
 
-  const groupId = message.chat.id._serialized;
-  const userIdToApprove = args[0]; // Expecting the user's ID as an argument
+  const userIdToApprove = args[0]; // Expecting the user's full JID (e.g., 234xxxxxxxxxx@s.whatsapp.net)
 
-  if (!userIdToApprove) {
-    await bot.sendMessage(message.from, 'Usage: !approve [user id]');
+  if (!userIdToApprove?.includes('@s.whatsapp.net')) {
+    await sock.sendMessage(msg.key.remoteJid, 'Usage: !approve [user JID (e.g., 234xxxxxxxxxx@s.whatsapp.net)]');
     return;
   }
 
   try {
-    await bot.acceptGroupInvite(groupId, userIdToApprove);
-    await bot.sendMessage(message.from, `✅ Approved join request from ${userIdToApprove}`);
+    await sock.groupAcceptInvite(msg.key.remoteJid, userIdToApprove);
+    await sock.sendMessage(msg.key.remoteJid, `✅ Approved join request from ${userIdToApprove.split('@')[0]}`);
   } catch (error) {
     console.error('Error approving join request:', error);
-    await bot.sendMessage(message.from, '❌ Could not approve the join request.');
+    await sock.sendMessage(msg.key.remoteJid, '❌ Could not approve the join request.');
   }
 }
+
 module.exports = {
   handleGroupInfo,
   handleMentionAll,
