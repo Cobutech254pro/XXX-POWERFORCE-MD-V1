@@ -1,168 +1,188 @@
 // In your commands/user.js
 
-const userProfiles = {}; // In-memory storage for user profiles (replace with persistent storage later)
-const userBios = {};     // In-memory storage for user bios (replace with persistent storage later)
-const userWarnings = {}; 
+// In-memory storage (replace with persistent storage later)
+const userProfiles = {};
+const userBios = {};
+const userWarnings = {};
 const featureRequests = [];
 const feedbackMessages = [];
 const adminContacts = [];
-const userNicknames = {}; // In-memory storage for user nicknames (replace with persistent storage later)
+const userNicknames = {};
 
-// Bot owner number (replace with your number including country code)
-const botOwnerNumber = '+YOUR_BOT_OWNER_NUMBER';
-const botAdmins = ['+ADMIN_NUMBER_1', '+ADMIN_NUMBER_2']; // Add other admin numbers if needed
+// Bot owner number (replace with your number including country code - ensure no leading '+')
+const botOwnerNumber = 'YOUR_BOT_OWNER_NUMBER';
+const botAdmins = ['ADMIN_NUMBER_1', 'ADMIN_NUMBER_2']; // Add other admin numbers (ensure no leading '+')
 
-// In-memory state for auto-read (this will be lost on bot restart)
+// In-memory state for auto-read
 let autoReadEnabled = false;
 
-async function isBotAdmin(message) {
-  return message.from === botOwnerNumber || botAdmins.includes(message.from);
+async function isBotAdmin(sock, msg) {
+  const sender = msg.key.participant || msg.key.remoteJid;
+  const senderNumber = sender.split(':')[0] || sender.split('@')[0];
+  const sockNumber = sock.user.id.split(':')[0] || sock.user.id.split('@')[0];
+
+  if (senderNumber === botOwnerNumber) return true;
+  if (botAdmins.includes(senderNumber)) return true;
+
+  if (msg.key.remoteJid.endsWith('@g.us')) {
+    const metadata = await sock.groupMetadata(msg.key.remoteJid);
+    if (metadata) {
+      const participant = metadata.participants.find(p => (p.id.split(':')[0] || p.id.split('@')[0]) === senderNumber);
+      return participant?.admin === 'admin' || participant?.admin === 'superadmin';
+    }
+  }
+  return false;
 }
 
-async function handleProfile(bot, message) {
-  const userId = message.from;
-  const profile = userProfiles[userId] || { name: 'User', joined: new Date().toLocaleString('en-KE', { timeZone: 'Africa/Nairobi' }) };
+async function handleProfile(sock, msg) {
+  const userId = msg.key.remoteJid;
+  const profile = userProfiles[userId] || { name: msg.pushName || 'User', joined: new Date().toLocaleString('en-KE', { timeZone: 'Africa/Nairobi' }) };
   const bio = userBios[userId] || 'No bio set.';
-  await bot.sendMessage(message.from, `👤 *Your Profile*\nName: ${profile.name}\nJoined: ${profile.joined}\nBio: ${bio}`);
+  await sock.sendMessage(msg.key.remoteJid, { text: `👤 *Your Profile*\nName: ${profile.name}\nJoined: ${profile.joined}\nBio: ${bio}` });
 }
 
-async function handleSetProfile(bot, message, args) {
+async function handleSetProfile(sock, msg, args) {
   const newName = args.join(' ');
   if (!newName) {
-    await bot.sendMessage(message.from, 'Please provide a name to set for your profile (e.g., !setprofile John Doe).');
+    await sock.sendMessage(msg.key.remoteJid, { text: 'Please provide a name to set for your profile (e.g., !setprofile John Doe).' });
     return;
   }
-  userProfiles[message.from] = { name: newName, joined: userProfiles[message.from]?.joined || new Date().toLocaleString('en-KE', { timeZone: 'Africa/Nairobi' }) };
-  await bot.sendMessage(message.from, `✅ Your profile name has been updated to: ${newName}`);
+  userProfiles[msg.key.remoteJid] = { name: newName, joined: userProfiles[msg.key.remoteJid]?.joined || new Date().toLocaleString('en-KE', { timeZone: 'Africa/Nairobi' }) };
+  await sock.sendMessage(msg.key.remoteJid, { text: `✅ Your profile name has been updated to: ${newName}` });
 }
 
-async function handleBio(bot, message) {
-  const bio = userBios[message.from] || 'No bio set.';
-  await bot.sendMessage(message.from, `✍️ *Your Bio:*\n${bio}`);
+async function handleBio(sock, msg) {
+  const bio = userBios[msg.key.remoteJid] || 'No bio set.';
+  await sock.sendMessage(msg.key.remoteJid, { text: `✍️ *Your Bio:*\n${bio}` });
 }
 
-async function handleSetBio(bot, message, args) {
+async function handleSetBio(sock, msg, args) {
   const newBio = args.join(' ');
   if (!newBio) {
-    await bot.sendMessage(message.from, 'Please provide a bio to set for your profile (e.g., !setbio Loves coding and pizza!).');
+    await sock.sendMessage(msg.key.remoteJid, { text: 'Please provide a bio to set for your profile (e.g., !setbio Loves coding and pizza!).' });
     return;
   }
-  userBios[message.from] = newBio;
-  await bot.sendMessage(message.from, `✅ Your bio has been updated to:\n${newBio}`);
+  userBios[msg.key.remoteJid] = newBio;
+  await sock.sendMessage(msg.key.remoteJid, { text: `✅ Your bio has been updated to:\n${newBio}` });
 }
 
-async function handleReportUser(bot, message, args) {
-  if (!message.mentionedJidList || message.mentionedJidList.length === 0 || !args[1]) {
-    await bot.sendMessage(message.from, 'Usage: !report @user [reason]');
+async function handleReportUser(sock, msg, args) {
+  if (!msg.quotedMessage || !args[0]) {
+    await sock.sendMessage(msg.key.remoteJid, { text: 'Usage: !report [reply to user] [reason]' });
     return;
   }
-  const reportedUser = message.mentionedJidList[0];
-  const reason = args.slice(1).join(' ');
-  const reportDetails = { reporter: message.from, reported: reportedUser, reason: reason, timestamp: new Date().toLocaleString('en-KE', { timeZone: 'Africa/Nairobi' }) };
-  // In a real scenario, you would store this report data
+
+  const quoted = await sock.loadMessage(msg.key.remoteJid, msg.quotedMessage.stanzaId);
+  const reportedUser = quoted.key.participant || quoted.key.remoteJid;
+  const reason = args.join(' ');
+  const reporter = msg.key.remoteJid;
+  const reportDetails = { reporter: reporter, reported: reportedUser, reason: reason, timestamp: new Date().toLocaleString('en-KE', { timeZone: 'Africa/Nairobi' }) };
   console.log('User Report:', reportDetails);
-  await bot.sendMessage(message.from, `✅ User @${reportedUser.split('@')[0]} has been reported for: ${reason}`);
+  await sock.sendMessage(msg.key.remoteJid, { text: `✅ User reported for: ${reason}` });
+  // In a real scenario, you would store this report data and potentially notify admins.
 }
 
-async function handleWarns(bot, message) {
-  const userId = message.from;
+async function handleWarns(sock, msg) {
+  const userId = msg.key.remoteJid;
   const warnings = userWarnings[userId] || [];
   if (warnings.length > 0) {
     let warnsText = `⚠️ *Your Warnings:*\n`;
     warnings.forEach((warn, index) => {
       warnsText += `${index + 1}. Reason: ${warn.reason} (Given on: ${warn.timestamp})\n`;
     });
-    await bot.sendMessage(message.from, warnsText);
+    await sock.sendMessage(msg.key.remoteJid, { text: warnsText });
   } else {
-    await bot.sendMessage(message.from, '✅ You have no warnings.');
+    await sock.sendMessage(msg.key.remoteJid, { text: '✅ You have no warnings.' });
   }
 }
 
-async function handleRequestFeature(bot, message, args) {
+async function handleRequestFeature(sock, msg, args) {
   const suggestion = args.join(' ');
   if (!suggestion) {
-    await bot.sendMessage(message.from, 'Please provide your feature suggestion (e.g., !request Add a music download command).');
+    await sock.sendMessage(msg.key.remoteJid, { text: 'Please provide your feature suggestion (e.g., !request Add a music download command).' });
     return;
   }
-  const requestDetails = { user: message.from, suggestion: suggestion, timestamp: new Date().toLocaleString('en-KE', { timeZone: 'Africa/Nairobi' }) };
+  const requestDetails = { user: msg.key.remoteJid, suggestion: suggestion, timestamp: new Date().toLocaleString('en-KE', { timeZone: 'Africa/Nairobi' }) };
   featureRequests.push(requestDetails);
   console.log('Feature Request:', requestDetails);
-  await bot.sendMessage(message.from, '✅ Thank you for your suggestion! It has been recorded.');
+  await sock.sendMessage(msg.key.remoteJid, { text: '✅ Thank you for your suggestion! It has been recorded.' });
 }
 
-async function handleFeedback(bot, message, args) {
+async function handleFeedback(sock, msg, args) {
   const feedbackText = args.join(' ');
   if (!feedbackText) {
-    await bot.sendMessage(message.from, 'Please provide your feedback (e.g., !feedback The bot is very helpful!).');
+    await sock.sendMessage(msg.key.remoteJid, { text: 'Please provide your feedback (e.g., !feedback The bot is very helpful!).' });
     return;
   }
-  const feedbackDetails = { user: message.from, feedback: feedbackText, timestamp: new Date().toLocaleString('en-KE', { timeZone: 'Africa/Nairobi' }) };
+  const feedbackDetails = { user: msg.key.remoteJid, feedback: feedbackText, timestamp: new Date().toLocaleString('en-KE', { timeZone: 'Africa/Nairobi' }) };
   feedbackMessages.push(feedbackDetails);
   console.log('Feedback Received:', feedbackDetails);
-  await bot.sendMessage(message.from, '✅ Thank you for your feedback!');
+  await sock.sendMessage(msg.key.remoteJid, { text: '✅ Thank you for your feedback!' });
 }
 
-async function handleContactAdmin(bot, message, args) {
+async function handleContactAdmin(sock, msg, args) {
   const adminMessage = args.join(' ');
   if (!adminMessage) {
-    await bot.sendMessage(message.from, 'Please provide the message you want to send to the admins (e.g., !contactadmin I need help with...).');
+    await sock.sendMessage(msg.key.remoteJid, { text: 'Please provide the message you want to send to the admins (e.g., !contactadmin I need help with...).' });
     return;
   }
-  const contactDetails = { user: message.from, message: adminMessage, timestamp: new Date().toLocaleString('en-KE', { timeZone: 'Africa/Nairobi' }) };
+  const contactDetails = { user: msg.key.remoteJid, message: adminMessage, timestamp: new Date().toLocaleString('en-KE', { timeZone: 'Africa/Nairobi' }) };
   adminContacts.push(contactDetails);
   console.log('Admin Contact:', contactDetails);
-  await bot.sendMessage(message.from, '✅ Your message has been sent to the bot administrators.');
+  await sock.sendMessage(msg.key.remoteJid, { text: '✅ Your message has been sent to the bot administrators.' });
   // In a real scenario, you would forward this message to the actual admin(s).
 }
 
-async function handleSetNickname(bot, message, args) {
-  if (!message.mentionedJidList || message.mentionedJidList.length === 0 || !args[1]) {
-    await bot.sendMessage(message.from, 'Usage: !setnickname @user [nickname]');
+async function handleSetNickname(sock, msg, args) {
+  if (!msg.quotedMessage || !args[0]) {
+    await sock.sendMessage(msg.key.remoteJid, { text: 'Usage: !setnickname [reply to user] [nickname]' });
     return;
   }
-  const targetUser = message.mentionedJidList[0];
-  const nickname = args.slice(1).join(' ');
+  const quoted = await sock.loadMessage(msg.key.remoteJid, msg.quotedMessage.stanzaId);
+  const targetUser = quoted.key.participant || quoted.key.remoteJid;
+  const nickname = args.join(' ');
   userNicknames[targetUser] = nickname;
-  await bot.sendMessage(message.from, `✅ Nickname for @${targetUser.split('@')[0]} set to: ${nickname}`);
+  await sock.sendMessage(msg.key.remoteJid, { text: `✅ Nickname set to: ${nickname} for the user you replied to.` });
   // Note: Nicknames are usually specific to a group and might require group context.
   // This implementation is a simple global storage.
 }
 
-async function handleDeleteMessage(bot, message, args) {
-  if (!await isBotAdmin(message)) {
-    await bot.sendMessage(message.from, '🚫 This command is only for bot owners and administrators.');
+async function handleDeleteMessage(sock, msg) {
+  if (!await isBotAdmin(sock, msg)) {
+    await sock.sendMessage(msg.key.remoteJid, { text: '🚫 This command is only for bot owners and administrators.' });
     return;
   }
 
-  if (!message.quotedMessage) {
-    await bot.sendMessage(message.from, 'Please reply to the message you want to delete with the !delete command.');
+  if (!msg.quotedMessage) {
+    await sock.sendMessage(msg.key.remoteJid, { text: 'Please reply to the message you want to delete with the !delete command.' });
     return;
   }
 
   try {
-    await message.quotedMessage.delete(true); // The 'true' argument deletes for everyone
-    await bot.sendMessage(message.from, '✅ Message deleted successfully.');
+    const quoted = await sock.loadMessage(msg.key.remoteJid, msg.quotedMessage.stanzaId);
+    await sock.sendMessage(msg.key.remoteJid, { delete: quoted.key });
+    await sock.sendMessage(msg.key.remoteJid, '✅ Message deleted successfully.');
   } catch (error) {
     console.error('Error deleting message:', error);
-    await bot.sendMessage(message.from, '❌ Failed to delete the message.');
+    await sock.sendMessage(msg.key.remoteJid, '❌ Failed to delete the message.');
   }
 }
 
-async function handleAutoRead(bot, message, args) {
-  if (!await isBotAdmin(message)) {
-    await bot.sendMessage(message.from, '🚫 This command is only for bot owners and administrators.');
+async function handleAutoRead(sock, msg, args) {
+  if (!await isBotAdmin(sock, msg)) {
+    await sock.sendMessage(msg.key.remoteJid, { text: '🚫 This command is only for bot owners and administrators.' });
     return;
   }
 
   const action = args[0] ? args[0].toLowerCase() : '';
   if (action === 'on') {
     autoReadEnabled = true;
-    await bot.sendMessage(message.from, '✅ Auto-read enabled.');
+    await sock.sendMessage(msg.key.remoteJid, { text: '✅ Auto-read enabled.' });
   } else if (action === 'off') {
     autoReadEnabled = false;
-    await bot.sendMessage(message.from, '✅ Auto-read disabled.');
+    await sock.sendMessage(msg.key.remoteJid, { text: '✅ Auto-read disabled.' });
   } else {
-    await bot.sendMessage(message.from, 'Usage: !autoread on | off');
+    await sock.sendMessage(msg.key.remoteJid, { text: 'Usage: !autoread on | off' });
   }
 }
 
@@ -178,5 +198,5 @@ module.exports = {
   handleContactAdmin,
   handleSetNickname,
   handleDeleteMessage,
-  handleAutoRead, 
+  handleAutoRead,
 };
