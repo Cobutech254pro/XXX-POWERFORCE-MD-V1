@@ -5,13 +5,13 @@ const menuText = `
 
 [Image: URL_TO_YOUR_BOT_IMAGE]
 
-*User:* User's Display Name (or "User" if not available)
+*User:* %USERNAME%
 *Bot Mode:* Deactivated (initially)
 *User Country:* Kenya
 *Running Time:* 0 seconds (initially, until the bot has been running longer)
 *Bot Speed:* Fast (will be determined at runtime)
 *Prefix:* !
-*User Number:* user's WhatsApp number
+*User Number:* %USERNUMBER%
 *Platform:* WhatsApp
 
 Please type the number corresponding to the category you want to explore:
@@ -204,93 +204,93 @@ Please type the number for the command you want to use:
 Type \`0\` to go back to the main menu.
 `;
 
-async function handleMenuCommand(bot, message) {
+async function handleMenuCommand(sock, msg) {
   let menu = menuText;
 
-  // Get user info if available (replace with your actual logic)
-  const userName = message.pushName || "User"; // Example: WhatsApp user's display name
-  const userNumber = message.from; // Example: WhatsApp user's phone number
+  // Get user info (pushName is usually available)
+  const userName = msg.pushName || "User";
+  const userNumber = msg.key.remoteJid;
 
   // Add user-specific info to the menu
-  menu = menu.replace("*User:* User's Display Name (or \"User\" if not available)", `*User:* ${userName}`);
-  menu = menu.replace("*User Number:* user's WhatsApp number", `*User Number:* ${userNumber}`);
+  menu = menu.replace("%USERNAME%", userName);
+  menu = menu.replace("%USERNUMBER%", userNumber.split('@')[0]); // Remove @s.whatsapp.net
 
-  await bot.sendMessage(message.from, menu);
+  await sock.sendMessage(msg.key.remoteJid, { text: menu });
 }
 
-async function handleMenuSelection(bot, message, selectedNumber) {
+async function handleMenuSelection(sock, msg, selectedNumber) {
   switch (selectedNumber) {
     case '1':
-      await bot.sendMessage(message.from, botInfoMenu);
+      await sock.sendMessage(msg.key.remoteJid, { text: botInfoMenu });
       break;
     case '2':
-      await bot.sendMessage(message.from, generalCommandsMenu);
+      await sock.sendMessage(msg.key.remoteJid, { text: generalCommandsMenu });
       break;
     case '3':
-      await bot.sendMessage(message.from, socialMediaMenu);
+      await sock.sendMessage(msg.key.remoteJid, { text: socialMediaMenu });
       break;
     case '4':
-      await bot.sendMessage(message.from, groupManagementMenu);
+      await sock.sendMessage(msg.key.remoteJid, { text: groupManagementMenu });
       break;
     case '5':
-      await bot.sendMessage(message.from, utilityCommandsMenu);
+      await sock.sendMessage(msg.key.remoteJid, { text: utilityCommandsMenu });
       break;
     case '6':
-      await bot.sendMessage(message.from, funGamesMenu);
+      await sock.sendMessage(msg.key.remoteJid, { text: funGamesMenu });
       break;
     case '7':
-      await bot.sendMessage(message.from, infoRetrievalMenu);
+      await sock.sendMessage(msg.key.remoteJid, { text: infoRetrievalMenu });
       break;
     case '8':
-      await bot.sendMessage(message.from, imageManipulationMenu);
+      await sock.sendMessage(msg.key.remoteJid, { text: imageManipulationMenu });
       break;
     case '9':
-      await bot.sendMessage(message.from, urlToolsMenu);
+      await sock.sendMessage(msg.key.remoteJid, { text: urlToolsMenu });
       break;
     case '10':
-      await bot.sendMessage(message.from, userCommandsMenu);
+      await sock.sendMessage(msg.key.remoteJid, { text: userCommandsMenu });
       break;
     case '11':
-      await bot.sendMessage(message.from, generalMenu);
+      await sock.sendMessage(msg.key.remoteJid, { text: generalMenu });
       break;
     default:
-      await bot.sendMessage(message.from, 'Invalid selection. Please type a number from the main menu.');
+      await sock.sendMessage(msg.key.remoteJid, { text: 'Invalid selection. Please type a number from the main menu.' });
   }
 }
 
-async function handleHello(bot, message) {
+async function handleHello(sock, msg) {
   const greetings = ["Hello!", "Hi there!", "Hey!", "Greetings!"];
   const randomGreeting = greetings[Math.floor(Math.random() * greetings.length)];
-  await bot.sendMessage(message.from, `${randomGreeting} How can I help you today?`);
+  await sock.sendMessage(msg.key.remoteJid, { text: `${randomGreeting} How can I help you today?` });
 }
 
-async function handleCreator(bot, message) {
-  await bot.sendMessage(message.from, "I was created with passion and a lot of code. You can think of me as a digital entity here to assist!");
+async function handleCreator(sock, msg) {
+  await sock.sendMessage(msg.key.remoteJid, { text: "I was created with passion and a lot of code. You can think of me as a digital entity here to assist!" });
 }
 
-async function handlePing(bot, message) {
+async function handlePing(sock, msg) {
   const startTime = Date.now();
-  await bot.sendMessage(message.from, 'Pinging...');
+  const sentMessage = await sock.sendMessage(msg.key.remoteJid, { text: 'Pinging...' });
   const endTime = Date.now();
   const pingTime = endTime - startTime;
-  await bot.sendMessage(message.from, `Pong! Response time: ${pingTime}ms`);
+  await sock.sendMessage(msg.key.remoteJid, { text: `Pong! Response time: ${pingTime}ms` }, { quoted: sentMessage });
 }
 
-async function handleSay(bot, message, args) {
+async function handleSay(sock, msg, args) {
   const textToSay = args.join(' ');
   if (textToSay) {
-    await bot.sendMessage(message.from, textToSay);
+    await sock.sendMessage(msg.key.remoteJid, { text: textToSay });
   } else {
-    await bot.sendMessage(message.from, 'Please provide something for me to say (e.g., !say Hello everyone!).');
+    await sock.sendMessage(msg.key.remoteJid, { text: 'Please provide something for me to say (e.g., !say Hello everyone!).' });
   }
 }
 
-async function handleRepeat(bot, message, args) {
+async function handleRepeat(sock, msg, args) {
   const textToRepeat = args.join(' ');
   if (textToRepeat) {
-    await bot.sendMessage(message.from, textToRepeat);
+    await sock.sendMessage(msg.key.remoteJid, { text: textToRepeat });
   } else {
-    await bot.sendMessage(message.from, 'Please provide text for me to repeat (e.g., !repeat This is fun!).');
+    await sock.sendMessage(msg.key.remoteJid, { text: 'Please provide text for me to repeat (e.g., !repeat This is fun!).' });
   }
 }
 
