@@ -2,18 +2,18 @@
 
 let chatbotEnabled = false;
 
-async function handleChatbotActivate(bot, message) {
+async function handleChatbotActivate(sock, msg) {
   chatbotEnabled = true;
-  await bot.sendMessage(message.from, 'Chatbot activated. I will now try to respond to your messages.');
+  await sock.sendMessage(msg.key.remoteJid, { text: 'Chatbot activated. I will now try to respond to your messages.' });
 }
 
-async function handleChatbotDeactivate(bot, message) {
+async function handleChatbotDeactivate(sock, msg) {
   chatbotEnabled = false;
-  await bot.sendMessage(message.from, 'Chatbot deactivated. I will no longer try to respond to regular messages.');
+  await sock.sendMessage(msg.key.remoteJid, { text: 'Chatbot deactivated. I will no longer try to respond to regular messages.' });
 }
 
-async function handleChatbotResponse(bot, message) {
-  if (chatbotEnabled && !message.body.startsWith('!') && !message.fromMe) {
+async function handleChatbotResponse(sock, msg) {
+  if (chatbotEnabled && !msg.body?.startsWith('!') && !msg.key.fromMe) {
     // Basic placeholder responses
     const responses = [
       "Interesting!",
@@ -23,7 +23,7 @@ async function handleChatbotResponse(bot, message) {
       "How does that make you feel?",
     ];
     const randomIndex = Math.floor(Math.random() * responses.length);
-    await bot.sendMessage(message.from, responses[randomIndex]);
+    await sock.sendMessage(msg.key.remoteJid, { text: responses[randomIndex] });
   }
 }
 
